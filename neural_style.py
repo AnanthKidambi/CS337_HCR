@@ -21,8 +21,14 @@ img_size = 512
 parser = argparse.ArgumentParser()
 parser.add_argument('-n', type=int, default=2000)
 args = parser.parse_args()
-content = "input/ashwin.jpg"
+content = "input/tubingen.jpg"
+# content = "input/ashwin.jpg"
+content = "input/Aspark-Owl.jpg"
+# style = "input/rain-princess-aframov.jpg"
 style = "input/vangogh_starry_night.jpg"
+# style = "input/escher_sphere.jpg"
+# style = "input/picasso_selfport1907.jpg"
+# style = "input/frida_kahlo.jpg"
 
 style_layer_nums = [1, 6, 11, 20, 29] # taken from https://www.mathworks.com/help/deeplearning/ref/vgg19.html
 content_layer_num = 22
@@ -64,8 +70,9 @@ class processor:
         temp = transforms.Compose([
             transforms.Lambda(lambda x: x.mul_(1./255)),
             transforms.Normalize(mean=[-m/s for m, s in zip(pre_means, pre_stds)], std=[1/s for s in pre_stds]),
+            transforms.Resize(img_size)
         ])(img[0].squeeze())
-        return transforms.ToPILImage()(temp.clamp(0, 1).cpu())
+        return transforms.ToPILImage()(temp.clamp(0,1).cpu())
 
 class extractor:
     def __init__(self, model, style_layers, content_layers) -> None:
