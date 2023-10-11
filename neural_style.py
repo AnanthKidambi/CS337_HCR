@@ -21,7 +21,7 @@ img_size = 512
 parser = argparse.ArgumentParser()
 parser.add_argument('-n', type=int, default=2000)
 args = parser.parse_args()
-content = "input/tubingen.jpg"
+content = "input/ashwin.jpg"
 style = "input/vangogh_starry_night.jpg"
 
 style_layer_nums = [1, 6, 11, 20, 29] # taken from https://www.mathworks.com/help/deeplearning/ref/vgg19.html
@@ -131,7 +131,8 @@ def closure():
         # print(f"style: {loss}")
         old_loss = loss.clone()
         # print(val.shape, actual_content_outputs[key].shape)
-        loss += content_weights[key]*((val - actual_content_outputs[key])**2).mean()
+        # loss += content_weights[key]*((val - actual_content_outputs[key])**2).mean()
+        loss += content_weights[key]*nn.functional.mse_loss(val, actual_content_outputs[key])
         # print(f"content: {loss - old_loss}")
     optimizer.zero_grad()
     loss.backward()
