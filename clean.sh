@@ -1,5 +1,2 @@
-cd output_flows
-rm *
-cd ../output_frames
-rm *
-cd ..
+rm output_flows/*
+rm output_frames/*

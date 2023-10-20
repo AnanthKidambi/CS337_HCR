@@ -12,14 +12,14 @@ from makegif import combine_as_gif
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #calculate optical flow of all frames in a video
-def generate_optical_flow(video_path : str):
-    input_frames, _, _ = read_video(video_path, output_format="TCHW")
-    input_frames = input_frames.to(device)
+def generate_optical_flow(input_frames : torch.Tensor, reverse : bool = False):
+    # input_frames, _, _ = read_video(video_path, output_format="TCHW", pts_unit='sec')
+    _input_frames = input_frames.to(device)
     weights = Raft_Large_Weights.DEFAULT
     transforms = weights.transforms()
 
-    img1_batch = input_frames[:-1]
-    img2_batch = input_frames[1:]
+    img1_batch = _input_frames[:-1]
+    img2_batch = _input_frames[1:]
 
     def preprocess(batch1, batch2):
         batch1 = functional.resize(batch1, size=((batch1.shape[2]//8)*8, (batch1.shape[3]//8)*8), antialias=False)
@@ -34,7 +34,10 @@ def generate_optical_flow(video_path : str):
     list_of_flows = []
     with torch.no_grad():
         for i in tqdm(range(len(img1_batch))):
-            list_of_flows.append(model(img1_batch[i].unsqueeze(0).to(device), img2_batch[i].unsqueeze(0).to(device))[-1].squeeze(0))
+            if reverse:
+                list_of_flows.append(model(img2_batch[i].unsqueeze(0).to(device), img1_batch[i].unsqueeze(0).to(device))[-1].squeeze(0))
+            else:
+                list_of_flows.append(model(img1_batch[i].unsqueeze(0).to(device), img2_batch[i].unsqueeze(0).to(device))[-1].squeeze(0))
             
     return torch.stack(list_of_flows)
 
@@ -45,11 +48,17 @@ if __name__  == "__main__":
     mid_dir = "output_flows"
     out_dir = "output"
 
-    optical_flow = generate_optical_flow(f'{in_dir}/{video_name}.{video_ext}')
+    input_frames, _, _ = read_video(f'{in_dir}/{video_name}.{video_ext}', output_format="TCHW", pts_unit='sec')
+
+    optical_flow = generate_optical_flow(input_frames, reverse=False)
+    reverse_optical_flow = generate_optical_flow(input_frames, reverse=True)
     for i in range(len(optical_flow)):
         flow_img = flow_to_image(optical_flow[i]).to("cpu")
         write_jpeg(flow_img, f"{mid_dir}/{video_name[:6]}_flow_{i}.jpg")
-
+        rev_flow_img = flow_to_image(reverse_optical_flow[i]).to("cpu")
+        write_jpeg(rev_flow_img, f"{mid_dir}/{video_name[:6]}_rev_flow_{i}.jpg")
+        
     combine_as_gif(f"{video_name[:6]}_flow_", 'jpg', mid_dir, out_dir, 331, 1, "bb_flow.gif")
+    combine_as_gif(f"{video_name[:6]}_rev_flow_", 'jpg', mid_dir, out_dir, 331, 1, "bb_rev_flow.gif")
     
     
