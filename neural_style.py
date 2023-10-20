@@ -83,17 +83,21 @@ class ImageStyleTransfer:
         style_img = Image.open(style).convert("RGB")
         return style_img, content_img
 
-    def __call__(self, content, style, save_path = None, num_steps = 500):
+    def __call__(self, content, style, save_path = None, num_steps = 500, init_img = None):
         self.style_img, self.content_img = self.get_images(content, style)
         p_content, p_style = self.proc.preprocess(self.content_img).to(self.device), self.proc.preprocess(self.style_img).to(self.device)
         actual_gram_matrices, _ = self.ext(p_style)
         _, actual_content_outputs = self.ext(p_content)
-        noise_img = p_content.clone()
+        if init_img is None:
+            noise_img = p_content.clone()
+        else:
+            noise_img = Image.open(init_img).convert("RGB")
+            noise_img = self.proc.preprocess(noise_img).to(self.device)
         noise_img.requires_grad = True
         num_iter = [0]
         iter_range = tqdm(range(num_steps))
         lr = 1
-        optimizer = torch.optim.LBFGS([noise_img], max_iter=num_steps, lr=lr)
+        optimizer = torch.optim.LBFGS([noise_img], max_iter=1, lr=lr)
         def closure():
             iter_range.update()
             style_outputs, content_outputs = self.ext(noise_img)
@@ -115,7 +119,7 @@ class ImageStyleTransfer:
             optimizer.zero_grad()
             loss.backward()
             return loss
-        for _ in range(1):
+        for _ in range(num_steps):
             optimizer.step(closure)
 
         corr_img = noise_img.clone()
