@@ -2,5 +2,7 @@
 optical_flow_2.py
 plot_optical_flow.py
 output_flows/*
+output_frames/*
+__pycache__/*
 
 

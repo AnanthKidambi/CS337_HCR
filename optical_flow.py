@@ -3,21 +3,13 @@ from torchvision.io import read_video, write_jpeg
 from torchvision.models.optical_flow import Raft_Large_Weights, raft_large
 from torchvision.transforms import functional
 from torchvision.utils import flow_to_image
-from torchvision.transforms import transforms
-import os
-from PIL import Image
 import warnings
-import imageio
 from tqdm import tqdm
 # warnings.filterwarnings("ignore")
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from makegif import combine_as_gif
 
-def combine_as_gif(base : str, ext, num_images, step, gifname):
-    flow_dir = 'output_flows/'
-    out_dir = 'output/'
-    images = [imageio.imread(f'{flow_dir}{base}{i*step}.{ext}') for i in range(0, num_images)]
-    imageio.mimsave(f'{out_dir}{gifname}', images)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #calculate optical flow of all frames in a video
 def generate_optical_flow(video_path : str):
@@ -49,12 +41,15 @@ def generate_optical_flow(video_path : str):
 if __name__  == "__main__":
     video_name = "pexelscom_pavel_danilyuk_basketball_hd"
     video_ext = "mp4"
-    in_dir = 'input/'
-    optical_flow = generate_optical_flow(f'{in_dir}{video_name}.{video_ext}')
+    in_dir = 'input'
+    mid_dir = "output_flows"
+    out_dir = "output"
+
+    optical_flow = generate_optical_flow(f'{in_dir}/{video_name}.{video_ext}')
     for i in range(len(optical_flow)):
         flow_img = flow_to_image(optical_flow[i]).to("cpu")
-        write_jpeg(flow_img, f"output_flows/{video_name}_flow_{i}.jpg")
+        write_jpeg(flow_img, f"{mid_dir}/{video_name[:6]}_flow_{i}.jpg")
 
-    combine_as_gif(f"{video_name}_flow_", 'jpg', 331, 1, "bb_flow.gif")
+    combine_as_gif(f"{video_name[:6]}_flow_", 'jpg', mid_dir, out_dir, 331, 1, "bb_flow.gif")
     
     
