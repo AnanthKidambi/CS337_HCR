@@ -5,13 +5,12 @@ import imageio
 
 from neural_style import ImageStyleTransfer
 
-def combine_as_gif(base : str, num_images, step, gifname):
-    ext = 'jpg'
-    dir = 'output/'
-    images = [imageio.imread(f'{dir}{base}{i*step}.{ext}') for i in range(0, num_images)]
-    imageio.mimsave(f'{dir}{gifname}', images)
+def combine_as_gif(base : str, ext, num_images, step, gifname):
+    flow_dir = 'output_flows/'
+    out_dir = 'output/'
+    images = [imageio.imread(f'{flow_dir}{base}{i*step}.{ext}') for i in range(0, num_images)]
+    imageio.mimsave(f'{out_dir}{gifname}', images)
     
-
 if __name__ == "__main__":
     video_path = "input/pexelscom_pavel_danilyuk_basketball_hd.mp4"
     style_img = "input/rain-princess-aframov.jpg"
@@ -28,8 +27,6 @@ if __name__ == "__main__":
         torch.cuda.empty_cache()
         image_style_transfer = ImageStyleTransfer()
         image_style_transfer(f"output/frame_{i}.jpg", style_img, save_path=f"output/processed_frame_{i}.jpg", init_img=(f"output/frame_{i-step}.jpg" if i!=0 else None), num_steps=(500 if i==0 else 100))
-        # import time
-        # time.sleep(1)
-        # os.system("python neural_style.py")
+
     combine_as_gif('processed_frame_', 330//step + 1, step, 'princess_opt.gif')
-    # os.system("wsl -e ffmpeg -f image2 -framerate 30 -i output/processed_frame_%d.jpg -loop -1 output/final_vid.gif")
+    
