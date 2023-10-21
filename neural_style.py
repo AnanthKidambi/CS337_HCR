@@ -104,18 +104,9 @@ class ImageStyleTransfer:
             loss = 0.
             num_iter[0] += 1
             for key, val in style_outputs.items():
-                # output_flat = val.view(val.shape[1], -1)
-                # gram_matrix = torch.matmul(output_flat, output_flat.t())
-                # loss += style_weights[key] * ((gram_matrix - actual_gram_matrices[key])**2).mean()
                 loss += self.style_weights[key] * nn.functional.mse_loss(style_outputs[key], actual_gram_matrices[key])
             for key, val in content_outputs.items():
-                # print(f"============== iter : {num_iter[0]} ====================")
-                # print(f"style: {loss}")
-                # old_loss = loss.clone()
-                # print(val.shape, actual_content_outputs[key].shape)
-                # loss += content_weights[key]*((val - actual_content_outputs[key])**2).mean()
                 loss += self.content_weights[key]*nn.functional.mse_loss(val, actual_content_outputs[key])
-                # print(f"content: {loss - old_loss}")
             optimizer.zero_grad()
             loss.backward()
             return loss

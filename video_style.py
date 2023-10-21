@@ -15,13 +15,12 @@ from optical_flow import generate_optical_flow
 
 class VideoStyleTransfer:
     def __init__(self) -> None:
-
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Device being used:", self.device)
         # pre_means = [0.485, 0.456, 0.406]
         self.pre_means = [0.48501961, 0.45795686, 0.40760392]
-        self.pre_stds = [1, 1, 1]#[0.229, 0.224, 0.225]
-        self.img_size = (512, 904)
+        self.pre_stds = [1, 1, 1] #[0.229, 0.224, 0.225]
+        self.img_size = (512, 904)  # change this, this only works for one particular video
 
         style_layer_nums = [1, 6, 11, 20, 29] # taken from https://www.mathworks.com/help/deeplearning/ref/vgg19.html
         content_layer_num = 22
@@ -53,63 +52,102 @@ class VideoStyleTransfer:
         prev_out_img = Image.open(prev_out).convert("RGB")
         return style_img, content_img, prev_out_img
 
-    # expects p_image and flow to be on the cpu
-    # expects the flow from the destination image to the source image, i.e. the reverse flow
     def warp(self, p_image : torch.Tensor, flow : torch.Tensor):
-        _, h, w = flow.shape
-        flow_map = torch.zeros(flow.shape)
-        flow_map[1] = flow[1] + torch.arange(flow.shape[1])[:, None]
-        # print(torch.arange(flow.shape[1])[:, None].shape)
-        # print(torch.arange(flow.shape[2])[None, :].shape)
-        flow_map[0] = flow[0] + torch.arange(flow.shape[2])[None, :]
+        '''
+            :param p_image: The image to warp. Shape should be (C, H, W) and device should be CPU
+            :param flow: The inverse function of the flow that is supposed to be warped over the image. Shape should be (2, H, W) and device should be CPU
+
+            Outputs the warped image with shape (C, H, W) on CPU
+        '''
+        assert p_image.device == torch.device("cpu")
+        assert flow.device == torch.device("cpu")
+        
+        flow_map = flow.clone()
+        flow_map[1] += torch.arange(flow.shape[1])[:, None]
+        flow_map[0] += torch.arange(flow.shape[2])[None, :]
         dst = []
+
         for chan in range(p_image.shape[0]):
             temp = cv2.remap(p_image[chan].numpy(), flow_map[0].numpy(), flow_map[1].numpy(), interpolation=cv2.INTER_CUBIC, borderMode=cv2.BORDER_TRANSPARENT)
             dst.append(torch.tensor(temp))
         return torch.stack(dst).cpu()
     
-    # everything is on the gpu
     def get_mask_disoccluded(self, flow : torch.Tensor, rev_flow : torch.Tensor):
-        w_bar = self.warp(flow.cpu(), rev_flow.cpu()).to(self.device)
-        return (torch.square(w_bar + rev_flow).sum(dim=0) <= 0.01*(torch.square(flow).sum(dim=0) + torch.square(rev_flow).sum(dim=0)) + 0.5).to(self.device)
+        '''
+            :param flow: Forward flow from frame[i-1]. Shape should be (2, H, W) and device should be CPU
+            :param rev_flow: Reverse flow from frame[i] to frame[i-1]. Shape should be (2, H, W) and device should be CPU
+
+            Outputs the disoccluded region mask with shape (H, W) on CPU
+        '''
+        assert flow.device == torch.device("cpu")
+        assert rev_flow.device == torch.device("cpu")
+
+        w_bar = self.warp(flow, rev_flow)
+        return (torch.square(w_bar + rev_flow).sum(dim=0) <= (0.01*(torch.square(flow).sum(dim=0) + torch.square(rev_flow).sum(dim=0)) + 0.5))
 
     def get_mask_edge(self, rev_flow : torch.Tensor):
+        '''
+            :param rev_flow: Reverse flow from frame[i] to frame[i-1]. Shape should be (2, H, W) and device should be CPU
+
+            Outputs the disoccluded region mask with shape (H, W) on CPU
+        '''
+        assert rev_flow.device == torch.device("cpu")
+
         x_grad = torch.gradient(rev_flow[1])
         y_grad = torch.gradient(rev_flow[0])
-        return torch.square(torch.stack(x_grad)).sum(dim=0) + torch.square(torch.stack(y_grad)).sum(dim=0) <= 0.01*torch.square(rev_flow).sum(dim=0) + 0.002
+        return (torch.square(torch.stack(x_grad)).sum(dim=0) + torch.square(torch.stack(y_grad)).sum(dim=0) <= (0.01*torch.square(rev_flow).sum(dim=0) + 0.002))
 
     def __call__(self, content : str, style : str, flow : torch.Tensor,  prev_out : str, rev_flow : torch.Tensor, save_path = None, num_steps = 500):
-        # flow is the optical flow between the ith frame(this frame) and the (i-1)th frame, which is the entry at index (i-1) of the tensor returned from generate_optical_flow.
-        # rev_flow is the reverse optical flow, i.e. the flow between the (i-1)th frame and the ith frame, which is the entry at index (i-1) of the tensor returned from generate_optical_flow(reverse=True).
-
+        '''
+            :param content: Path to content image. Will be converted to (1, C, H, W)
+            :param style: Path to style image. Will be converted to (1, C, H, W)
+            :param flow: The forward optical flow. For frame[i], this is the flow form frame[i-1] to frame[i]. Shape should be (2, H, W)
+            :param prev_out: Path to the most recently computed stylized frame. Will be converted to (1, C, H, W)
+            :param rev_flow: The reverse optical flow. For frame[i], this is the reverse flow from frame[i] to frame[i-1]. Shape should be (2, H, W)
+            :param num_steps: Number of iterations of the optimizer. Default is 500
+        '''
         # ========= sanity checks ============
         assert flow.shape[0] == 2
         assert rev_flow.shape[0] == 2
         # ========= end of sanity checks ============
 
         self.style_img, self.content_img, self.prev_frame_img = self.get_images(content, style, prev_out)
-        p_content, p_style, p_prev = self.proc.preprocess(self.content_img).to(self.device), self.proc.preprocess(self.style_img).to(self.device), self.proc.preprocess(self.prev_frame_img).cpu()
+
+        p_content, p_style, p_prev_frame = self.proc.preprocess(self.content_img).to(self.device), self.proc.preprocess(self.style_img).to(self.device), self.proc.preprocess(self.prev_frame_img).cpu()
 
         actual_gram_matrices, _ = self.ext(p_style)
         _, actual_content_outputs = self.ext(p_content)
 
-        prev_warped = self.warp(p_prev.squeeze(0), rev_flow).unsqueeze(0).to(self.device) # note that we are using the reverse flow because of the semantics of cv2.remap
-        flow = flow.to(self.device)
-        rev_flow = rev_flow.to(self.device)
+        ##### CPU #############
+
+        prev_warped = self.warp(p_prev_frame.squeeze(0), rev_flow).unsqueeze(0) # note that we are using the reverse flow because of the semantics of cv2.remap
 
         stt_mask = self.get_mask_disoccluded(flow, rev_flow) & self.get_mask_edge(rev_flow) # short term temporal consistency mask
 
-        # ========= sanity checks ============
-        print(prev_warped.shape, p_prev.shape)
-        assert prev_warped.shape == p_prev.shape 
-        # ========= end of sanity checks ============    
+        ##### CPU computation done #############
 
-        noise_img = prev_warped.clone()
+        flow = flow.to(self.device)
+        rev_flow = rev_flow.to(self.device)
+        p_prev_frame = p_prev_frame.to(self.device)
+        prev_warped = prev_warped.to(self.device)
+        stt_mask= stt_mask.to(self.device)
+
+        # ========= sanity checks ============
+        assert prev_warped.shape == p_prev_frame.shape 
+        # ========= end of sanity checks ============   
+
+        # w_img = self.proc.postprocess(stt_mask.clone())
+        w_img = transforms.ToPILImage()(stt_mask.clone().cpu().float())
+        w_img.save('output_frames/pmask.jpg') 
+
+        # noise_img = prev_warped.clone()
+        noise_img = p_content.clone()
         noise_img.requires_grad = True
         num_iter = [0]
         iter_range = tqdm(range(num_steps))
         lr = 1
         optimizer = torch.optim.LBFGS([noise_img], max_iter=1, lr=lr)
+
         def closure():
             iter_range.update()
             style_outputs, content_outputs = self.ext(noise_img)
@@ -122,7 +160,7 @@ class VideoStyleTransfer:
 
             ## add the short term temporal consistency loss
             stt_loss = self.stt_weight * torch.mean(torch.square(noise_img - prev_warped)[:, :, stt_mask[:, :]])
-            print("stt_loss =", stt_loss)
+            # print("stt_loss =", stt_loss)
             # loss += stt_loss
   
             optimizer.zero_grad()
@@ -155,10 +193,13 @@ if __name__ == "__main__":
     if args.force:
         input_frames, _, _ = read_video(f'{in_dir}/{video_name}.{video_ext}', output_format="TCHW", pts_unit='sec')
         input_frames = transforms.Resize(img_size)(input_frames)
-
+        list_frames = []
         for i in range(input_frames.shape[0]):
-            if i%step == 0:
-                write_jpeg(input_frames[i], f"{mid_dir}/{video_name[:6]}_frame_{i}.jpg")
+            if i % step == 0:
+                list_frames.append(input_frames[i])
+                write_jpeg(input_frames[i], f"{mid_dir}/{video_name[:6]}_frame_{i//step}.jpg")
+
+        input_frames = torch.stack(list_frames) # input frames reduced using step
 
         if not args.load_cached_flows:
             print("Computing forward optical flows...")
@@ -174,10 +215,8 @@ if __name__ == "__main__":
             optical_flow = torch.load('optical_flow.pt').cpu()
             reverse_optical_flow = torch.load('reverse_optical_flow.pt').cpu()
 
-        for i in range(input_frames.shape[0]):
-            if i % step != 0:
-                continue
-            print("========iter: ", i // step, "============")
+        for i in range(len(input_frames)):
+            print("========iter: ", i, "============")
             torch.cuda.empty_cache()
             if i == 0:
                 if args.load_cached_flows:
@@ -198,12 +237,11 @@ if __name__ == "__main__":
                     f'{mid_dir}/{video_name[:6]}_frame_{i}.jpg', 
                     f'{in_dir}/{style_name}.{style_ext}', 
                     optical_flow[i-1],
-                    f'{mid_dir}/{video_name[:6]}_processed_frame_{i-step}.jpg',
+                    f'{mid_dir}/{video_name[:6]}_processed_frame_{i-1}.jpg',
                     reverse_optical_flow[i-1],
                     save_path=f"{mid_dir}/{video_name[:6]}_processed_frame_{i}.jpg", 
                     num_steps=500
                 )
             
-
-    combine_as_gif(f'{video_name[:6]}_processed_frame_', 'jpg', mid_dir, out_dir, 330//step + 1, step, f'{video_name[:6]}_{style_name[:6]}.gif')
+    combine_as_gif(f'{video_name[:6]}_processed_frame_', 'jpg', mid_dir, out_dir, 330//step, 1, f'{video_name[:6]}_{style_name[:6]}.gif')
     
