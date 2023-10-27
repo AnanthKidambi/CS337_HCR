@@ -14,13 +14,13 @@ from neural_style import ImageStyleTransfer, processor, extractor
 from optical_flow import generate_optical_flow
 
 class VideoStyleTransfer:
-    def __init__(self) -> None:
+    def __init__(self, img_size) -> None:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Device being used:", self.device)
         # pre_means = [0.485, 0.456, 0.406]
         self.pre_means = [0.48501961, 0.45795686, 0.40760392]
         self.pre_stds = [1, 1, 1] #[0.229, 0.224, 0.225]
-        self.img_size = (512, 904)  # change this, this only works for one particular video
+        self.img_size = img_size  # change this, this only works for one particular video
 
         style_layer_nums = [1, 6, 11, 20, 29] # taken from https://www.mathworks.com/help/deeplearning/ref/vgg19.html
         content_layer_num = 22
@@ -107,8 +107,8 @@ class VideoStyleTransfer:
             :param num_steps: Number of iterations of the optimizer. Default is 500
         '''
         # ========= sanity checks ============
-        assert flow.shape[0] == 2
-        assert rev_flow.shape[0] == 2
+        assert flow.shape[0] == 2, f"Shape is {flow.shape[0]}"
+        assert rev_flow.shape[0] == 2, f"Shape is {rev_flow.shape[0]}"
         # ========= end of sanity checks ============
 
         self.style_img, self.content_img, self.prev_frame_img = self.get_images(content, style, prev_out)
@@ -133,12 +133,30 @@ class VideoStyleTransfer:
         stt_mask= stt_mask.to(self.device)
 
         # ========= sanity checks ============
-        assert prev_warped.shape == p_prev_frame.shape 
+        assert prev_warped.shape == p_prev_frame.shape, f"Shapes {prev_warped.shape} and {p_prev_frame.shape} don't match" 
         # ========= end of sanity checks ============   
 
         # w_img = self.proc.postprocess(stt_mask.clone())
-        w_img = transforms.ToPILImage()(stt_mask.clone().cpu().float())
-        w_img.save('output_frames/pmask.jpg') 
+        # w_img = transforms.ToPILImage()(stt_mask.clone().cpu().float())
+        # w_img.save('output_frames/pmask.jpg') 
+
+        ### Saving masks and warped images for debugging ##########
+
+        self.proc.postprocess(prev_warped.clone()).save(f'output_flows/warped_{i}.jpg')
+        disocc_mask = self.get_mask_disoccluded(flow.cpu(), rev_flow.cpu())
+        edge_mask = self.get_mask_edge(rev_flow.cpu()) 
+        stt_mask = disocc_mask & edge_mask 
+        mask_img = torch.ones(prev_warped.shape, dtype=torch.uint8)*255
+        mask_img[:, :, ~edge_mask] = 0
+        write_jpeg(mask_img.cpu().squeeze(0), f'output_flows/edge_mask_{i}.jpg')
+        mask_img = torch.ones(prev_warped.shape, dtype=torch.uint8)*255
+        mask_img[:, :, ~disocc_mask] = 0
+        write_jpeg(mask_img.squeeze(0).cpu(), f'output_flows/disocc_mask_{i}.jpg')
+        mask_img = torch.ones(prev_warped.shape, dtype=torch.uint8)*255
+        mask_img[:, :, ~stt_mask] = 0
+        write_jpeg(mask_img.cpu().squeeze(0), f'output_flows/mask_{i}.jpg')
+
+        ### End of Saving masks and warped images for debugging ##########
 
         # noise_img = prev_warped.clone()
         noise_img = p_content.clone()
@@ -175,23 +193,59 @@ class VideoStyleTransfer:
             corr_img.save(save_path)
         return corr_img
 
+def get_frames(in_dir, video_name, video_ext):
+    """
+        :param in_dir: Input directory name
+        :param video_name: Video name inside in_dir
+        :param video_ext: Video extension (mp4 or gif)
+    """
+    if video_ext == 'gif':
+        input_frames = []
+        with Image.open(f'{in_dir}/{video_name}.{video_ext}') as f:
+            for i in range(f.n_frames):
+                f.seek(i)
+                input_frames.append(transforms.PILToTensor()(f.convert("RGB")))
+        input_frames = torch.stack(input_frames)
+    elif video_ext == 'mp4':
+        input_frames, _, _ = read_video(f'{in_dir}/{video_name}.{video_ext}', output_format="TCHW", pts_unit='sec')
+    else:
+        raise NotImplementedError("Skill Issue")
+    return input_frames
+
+def num_frames(in_dir, video_name, video_ext):
+    n_frames = None
+    if video_ext == 'gif':
+        input_frames = []
+        with Image.open(f'{in_dir}/{video_name}.{video_ext}') as f:
+            n_frames = f.n_frames
+    elif video_ext == 'mp4':
+        input_frames, _, _ = read_video(f'{in_dir}/{video_name}.{video_ext}', output_format="TCHW", pts_unit='sec')
+        n_frames = len(input_frames)
+    else:
+        raise NotImplementedError("Skill Issue")
+    return n_frames
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--load_cached_flows", action="store_true")
     args = parser.parse_args()
-    video_name = "pexelscom_pavel_danilyuk_basketball_hd"
-    video_ext = "mp4"
+    # video_name = "pexelscom_pavel_danilyuk_basketball_hd"
+    video_name = "dragon"
+    # video_ext = "mp4"
+    video_ext = "gif"
     style_name = "rain-princess-aframov"
     style_ext = "jpg"
     in_dir = 'input'
     mid_dir= "output_frames"
     out_dir = "output"
-    step = 5
-    img_size = (512, 904)
+    step = 1
+    img_size = None
+    n_frames = num_frames(in_dir, video_name, video_ext)
     
     if args.force:
-        input_frames, _, _ = read_video(f'{in_dir}/{video_name}.{video_ext}', output_format="TCHW", pts_unit='sec')
+        input_frames = get_frames(in_dir, video_name, video_ext)
+        img_size = tuple([i-i%8 for i in input_frames.shape[2:]])
         input_frames = transforms.Resize(img_size)(input_frames)
         list_frames = []
         for i in range(input_frames.shape[0]):
@@ -221,8 +275,7 @@ if __name__ == "__main__":
             if i == 0:
                 if args.load_cached_flows:
                     continue
-                image_style_transfer = ImageStyleTransfer()
-                image_style_transfer.img_size = img_size
+                image_style_transfer = ImageStyleTransfer(img_size)
                 image_style_transfer(
                     f"{mid_dir}/{video_name[:6]}_frame_{i}.jpg", 
                     f'{in_dir}/{style_name}.{style_ext}', 
@@ -231,8 +284,7 @@ if __name__ == "__main__":
                     num_steps=500
                 )
             else:
-                video_style_transfer = VideoStyleTransfer()
-                video_style_transfer.img_size = img_size
+                video_style_transfer = VideoStyleTransfer(img_size)
                 video_style_transfer(
                     f'{mid_dir}/{video_name[:6]}_frame_{i}.jpg', 
                     f'{in_dir}/{style_name}.{style_ext}', 
@@ -243,5 +295,5 @@ if __name__ == "__main__":
                     num_steps=500
                 )
             
-    combine_as_gif(f'{video_name[:6]}_processed_frame_', 'jpg', mid_dir, out_dir, 330//step, 1, f'{video_name[:6]}_{style_name[:6]}.gif')
+    combine_as_gif(f'{video_name[:6]}_processed_frame_', 'jpg', mid_dir, out_dir, (n_frames-1)//step, 1, f'{video_name[:6]}_{style_name[:6]}.gif')
     

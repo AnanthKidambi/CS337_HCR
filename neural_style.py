@@ -46,14 +46,14 @@ class extractor:
         return gram, content_out
 
 class ImageStyleTransfer:
-    def __init__(self) -> None:
+    def __init__(self, img_size) -> None:
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Device being used:", self.device)
         # pre_means = [0.485, 0.456, 0.406]
         self.pre_means = [0.48501961, 0.45795686, 0.40760392]
         self.pre_stds = [1, 1, 1]#[0.229, 0.224, 0.225]
-        self.img_size = (512, 904)
+        self.img_size = img_size
 
         style_layer_nums = [1, 6, 11, 20, 29] # taken from https://www.mathworks.com/help/deeplearning/ref/vgg19.html
         content_layer_num = 22
