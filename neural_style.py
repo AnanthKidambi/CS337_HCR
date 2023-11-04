@@ -48,7 +48,7 @@ class extractor:
 class ImageStyleTransfer:
     def __init__(self, img_size) -> None:
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = 'cpu'#torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Device being used:", self.device)
         # pre_means = [0.485, 0.456, 0.406]
         self.pre_means = [0.48501961, 0.45795686, 0.40760392]

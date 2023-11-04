@@ -17,6 +17,7 @@ from optical_flow import generate_optical_flow
 import os
 import shutil
 # torch.set_printoptions(threshold=99999)
+
 abbrev_to_full = {
         'pexel': 'pexelscom_pavel_danilyuk_basketball_hd',
         'aframov': 'rain-princess-aframov',
@@ -31,8 +32,8 @@ class VideoStyleTransfer:
     def __init__(self, img_size) -> None:
         self.device = 'cpu'
         #torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(torch.cuda.is_available())
-        print(torch.cuda.device_count())
+        # print(torch.cuda.is_available())
+        # print(torch.cuda.device_count())
         print("Device being used:", self.device)
         # pre_means = [0.485, 0.456, 0.406]
         self.pre_means = [0.48501961, 0.45795686, 0.40760392]
@@ -141,6 +142,10 @@ class VideoStyleTransfer:
         p_content = self.proc.preprocess(self.content_img).to(self.device)
         p_style = self.proc.preprocess(self.style_img).to(self.device)
         p_prev_frame = self.proc.preprocess(self.prev_frame_img).cpu()
+        print('check-input', p_style.isnan().nonzero(), p_content.isnan().nonzero(), p_prev_frame.isnan().nonzero())
+        p_style[p_style.isnan()] = 0.
+        p_content[p_content.isnan()] = 0.
+        p_prev_frame[p_prev_frame.isnan()] = 0.
 
         # compute gram matrices and feature maps to plug into the loss
         actual_gram_matrices, _ = self.ext(p_style)
@@ -149,6 +154,10 @@ class VideoStyleTransfer:
         ##### CPU computation #############
 
         prev_warped = self.warp(p_prev_frame.squeeze(0), rev_flow).unsqueeze(0) # note that we are using the reverse flow because of the semantics of cv2.remap
+        print('checking...', prev_warped.isnan().nonzero())
+        prev_warped[prev_warped.isnan()] = p_style[prev_warped.isnan()]
+        print('oh hey, is this true:', prev_warped.isinf().nonzero())
+        prev_warped[prev_warped.isinf()] = 1<<16
 
         disocc_mask = self.get_mask_disoccluded(flow, rev_flow)
         edge_mask = self.get_mask_edge(rev_flow)
@@ -188,6 +197,7 @@ class VideoStyleTransfer:
         # global noise_img
         # prev_warped = prev_warped.clip(0, 255)
         # print('ok, here goes', noise_img.device, prev_warped.device)
+        
         noise_img = prev_warped.clone()
         print('have set the thing to equal, duh!!')
         print('ok, here goes', noise_img.device, prev_warped.device)
@@ -210,11 +220,11 @@ class VideoStyleTransfer:
             print('start')
             print(np.linalg.norm((noise_img.detach() - prev_warped)/255))
             print(torch.mean(stt_mask * torch.square(noise_img.detach()-prev_warped)).item())
-            print(np.allclose(noise_img.detach(), prev_warped), '5')
+            # print(np.allclose(noise_img.detach(), prev_warped), '5')
             # exit()
             # print(stt_mask.shape, torch.square(noise_img-prev_warped).shape)
             print('end')
-            prev_warped[prev_warped.isnan()] = 0.
+            prev_warped[prev_warped.isnan()] = p_style[prev_warped.isnan()]
             noise_img = prev_warped.clone()
             print('now?\n', torch.allclose(noise_img, prev_warped))
             exit()
@@ -229,45 +239,50 @@ class VideoStyleTransfer:
         # print(prev_warped.shape[1] * prev_warped.shape[2] * prev_warped.shape[3])
 
         def closure():
-            print('closure called')
-            # global noise_img
-            print(torch.allclose(noise_img, prev_warped), '1')
             iter_range.update()
             self.proc.postprocess(noise_img.detach().clone()).save(f'random/noise_{i}_{num_iter[0]}.jpg')
-            print(torch.allclose(noise_img, prev_warped), '2')
             style_outputs, content_outputs = self.ext(noise_img)
-            # self.proc.postprocess(noise_img.clone()).save(f'random/noise_{i}_{num_iter[0]}2.jpg')
-            print(torch.allclose(noise_img, prev_warped), '3')
             loss = 0.
             num_iter[0] += 1
             content_loss = style_loss = 0.
             for key, val in style_outputs.items():
+                # print(actual_gram_matrices[key].isnan().nonzero())
+                # print(val.isnan().nonzero())
                 style_loss += self.style_weights[key] * F.mse_loss(val, actual_gram_matrices[key])
             for key, val in content_outputs.items():
+                # print(actual_content_outputs[key].isnan().nonzero())
+                # print(val.isnan().nonzero())
                 content_loss += self.content_weights[key] * F.mse_loss(val, actual_content_outputs[key])
             h, w = prev_warped.shape[2], prev_warped.shape[3]
             style_loss /= ((h * w))
-            loss = style_loss + content_loss
-            print(torch.allclose(noise_img, prev_warped), '4')
+            loss = style_loss.clip(0, 1e5) + content_loss.clip(0, 1e5)
             ## add the short term temporal consistency loss
-            print('start')
-            print(np.linalg.norm((noise_img.detach() - prev_warped)/255))
-            print(torch.mean(stt_mask * torch.square(noise_img.detach()-prev_warped)).item())
-            print(np.allclose(noise_img.detach(), prev_warped), '5')
+            # print('start')
+            # print(np.linalg.norm((noise_img.detach() - prev_warped)/255))
+            # print(torch.mean(stt_mask * torch.square(noise_img.detach()-prev_warped)).item())
+            # print(np.allclose(noise_img.detach(), prev_warped), '5')
             # exit()
             # print(stt_mask.shape, torch.square(noise_img-prev_warped).shape)
-            print('end')
+            # print('end')
             # noise_img2 = torch.clip(noise_img, 0, 255)
             stt_loss = self.stt_weight * torch.mean(stt_mask * torch.square(noise_img - prev_warped))
             print('style_loss =', style_loss.item())
             print('content_loss =', content_loss.item())
             print("stt_loss =", stt_loss.item())
             loss += stt_loss
-  
+
+            # a total variation loss to de-blur (make it smooth)
+            tv_y = F.mse_loss(noise_img[:, :, 1:, :], noise_img[:, :, :-1, :])
+            tv_x = F.mse_loss(noise_img[:, :, :, 1:], noise_img[:, :, :, :-1])
+            tv_loss = 2 * (tv_y + tv_x)
+            tv_loss *= 1e-1 # weight
+            print('tv_loss=', tv_loss.item())
+            loss += tv_loss
+
             optimizer.zero_grad()
             loss.backward()
             print(torch.max(noise_img.grad))
-            torch.nn.utils.clip_grad_value_(noise_img, clip_value=10)
+            torch.nn.utils.clip_grad_value_(noise_img, clip_value=1)
             print(torch.max(noise_img.grad))
             return loss
         
@@ -427,7 +442,7 @@ if __name__ == "__main__":
                 f'{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i-1}.jpg',
                 reverse_optical_flow[i-1].to('cpu'),
                 save_path=f"{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
-                num_steps=200
+                num_steps=100+50*i
             )
     combine_as_gif(f'{full_to_abbrev[video_name]}_processed_frame_', 'jpg', mid_dir, out_dir, 1+(n_frames-1)//step, 1, f'{full_to_abbrev[video_name]}_{full_to_abbrev[style_name]}.gif')
             
