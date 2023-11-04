@@ -9,28 +9,27 @@ from tqdm import tqdm
 
 from makegif import combine_as_gif
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = 'cpu'#torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f'using {device}, optical flows')
 
 #calculate optical flow of all frames in a video
 def generate_optical_flow(input_frames : torch.Tensor, reverse : bool = False):
     # input_frames, _, _ = read_video(video_path, output_format="TCHW", pts_unit='sec')
+    # print(input_frames.shape, input_frames.device)
     _input_frames = input_frames.to(device)
     weights = Raft_Large_Weights.DEFAULT
     transforms = weights.transforms()
 
     img1_batch = _input_frames[:-1]
     img2_batch = _input_frames[1:]
-
     def preprocess(batch1, batch2):
         batch1 = functional.resize(batch1, size=((batch1.shape[2]//8)*8, (batch1.shape[3]//8)*8), antialias=False)
         batch2 = functional.resize(batch2, size=((batch2.shape[2]//8)*8, (batch2.shape[3]//8)*8), antialias=False)
         return transforms(batch1, batch2)
     
     img1_batch, img2_batch = preprocess(img1_batch, img2_batch)
-
     model = raft_large(weights=Raft_Large_Weights.DEFAULT, progress=True).to(device)
     model = model.eval()
-
     list_of_flows = []
     with torch.no_grad():
         for i in tqdm(range(len(img1_batch))):

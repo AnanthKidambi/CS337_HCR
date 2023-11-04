@@ -2,36 +2,55 @@ import torch
 import torchvision.models  as models
 import torchvision.transforms as transforms
 import torch.nn as nn
+import torch.nn.functional as F
 from tqdm import tqdm
 from torchvision.models.feature_extraction import create_feature_extractor
 from PIL import Image
 from torchvision.io import read_video, write_jpeg
 import cv2
 import numpy as np
+import random
 from makegif import combine_as_gif
 import argparse
 from neural_style import ImageStyleTransfer, processor, extractor
 from optical_flow import generate_optical_flow
+import os
+import shutil
+# torch.set_printoptions(threshold=99999)
+abbrev_to_full = {
+        'pexel': 'pexelscom_pavel_danilyuk_basketball_hd',
+        'aframov': 'rain-princess-aframov',
+        'vangogh': 'vangogh-starry-night',
+        'oil': 'oil-crop',
+        'dragon': 'dragon',
+}
+
+full_to_abbrev = {v:k for k,v in abbrev_to_full.items()}
 
 class VideoStyleTransfer:
     def __init__(self, img_size) -> None:
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = 'cpu'
+        #torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(torch.cuda.is_available())
+        print(torch.cuda.device_count())
         print("Device being used:", self.device)
         # pre_means = [0.485, 0.456, 0.406]
         self.pre_means = [0.48501961, 0.45795686, 0.40760392]
         self.pre_stds = [1, 1, 1] #[0.229, 0.224, 0.225]
-        self.img_size = img_size  # change this, this only works for one particular video
+        self.img_size = img_size
 
         style_layer_nums = [1, 6, 11, 20, 29] # taken from https://www.mathworks.com/help/deeplearning/ref/vgg19.html
         content_layer_num = 22
 
         self.content_layers = {f"features.{content_layer_num}": "relu4_2"}
-        self.style_layers = {f"features.{i}": f"relu{j+1}_1" for j, i in enumerate(style_layer_nums)}
+        self.style_layers = {f"features.{i}": f"relu{j+1}_1" for j, i in enumerate(style_layer_nums)} # hardcoded layer names
 
-        _style_wt_list = [1e3/n**2 for n in [64,128,256,512,512]]
-        self.style_weights = {f"relu{j+1}_1":_style_wt_list[j] for j, _ in enumerate(style_layer_nums)}
-        self.content_weights = {"relu4_2" : 1e0}
-        self.stt_weight = 1e3 # short term temporal consistency weight
+        # _style_wt_list = [1e3/n**2 for n in [64,128,256,512,512]]
+        _style_wt_list = [0.2]*5
+        self.style_weights = {val:_style_wt_list[j] for j, val in enumerate(self.style_layers.values())}
+        _content_wt_list = [1.0]
+        self.content_weights = {val:_content_wt_list[j] for j, val in enumerate(self.content_layers.values())}
+        self.stt_weight = 2e2 # short term temporal consistency weight
 
         self.model = self.get_model()
         self.content_img = None
@@ -55,12 +74,12 @@ class VideoStyleTransfer:
     def warp(self, p_image : torch.Tensor, flow : torch.Tensor):
         '''
             :param p_image: The image to warp. Shape should be (C, H, W) and device should be CPU
-            :param flow: The inverse function of the flow that is supposed to be warped over the image. Shape should be (2, H, W) and device should be CPU
+            :param flow: The *inverse* function of the flow that is supposed to be warped over the image. Shape should be (2, H, W) and device should be CPU
 
             Outputs the warped image with shape (C, H, W) on CPU
         '''
-        assert p_image.device == torch.device("cpu")
-        assert flow.device == torch.device("cpu")
+        assert p_image.device == torch.device("cpu"), 'need cpu in warp'
+        assert flow.device == torch.device("cpu"), 'need cpu in warp'
         
         flow_map = flow.clone()
         flow_map[1] += torch.arange(flow.shape[1])[:, None]
@@ -79,11 +98,13 @@ class VideoStyleTransfer:
 
             Outputs the disoccluded region mask with shape (H, W) on CPU
         '''
-        assert flow.device == torch.device("cpu")
-        assert rev_flow.device == torch.device("cpu")
+        assert flow.device == torch.device("cpu"), 'need cpu in warp (get_mask_disoccluded)'
+        assert rev_flow.device == torch.device("cpu"), 'need cpu in warp (get_mask_disoccluded)'
 
-        w_bar = self.warp(flow, rev_flow)
-        return (torch.square(w_bar + rev_flow).sum(dim=0) <= (0.01*(torch.square(flow).sum(dim=0) + torch.square(rev_flow).sum(dim=0)) + 0.5))
+        w_tilde = self.warp(flow, rev_flow)
+        return (self.squared_norm(w_tilde + rev_flow) <= 
+                (0.01*(self.squared_norm(w_tilde) + self.squared_norm(rev_flow)) 
+                 + 0.5))
 
     def get_mask_edge(self, rev_flow : torch.Tensor):
         '''
@@ -91,11 +112,12 @@ class VideoStyleTransfer:
 
             Outputs the disoccluded region mask with shape (H, W) on CPU
         '''
-        assert rev_flow.device == torch.device("cpu")
+        # no need to be in cpu?
+        # assert rev_flow.device == torch.device("cpu")
 
         x_grad = torch.gradient(rev_flow[1])
         y_grad = torch.gradient(rev_flow[0])
-        return (torch.square(torch.stack(x_grad)).sum(dim=0) + torch.square(torch.stack(y_grad)).sum(dim=0) <= (0.01*torch.square(rev_flow).sum(dim=0) + 0.002))
+        return (self.squared_norm(torch.stack(x_grad)) + self.squared_norm(torch.stack(y_grad)) <= (0.01*self.squared_norm(rev_flow) + 0.002))
 
     def __call__(self, content : str, style : str, flow : torch.Tensor,  prev_out : str, rev_flow : torch.Tensor, save_path = None, num_steps = 500):
         '''
@@ -109,20 +131,28 @@ class VideoStyleTransfer:
         # ========= sanity checks ============
         assert flow.shape[0] == 2, f"Shape is {flow.shape[0]}"
         assert rev_flow.shape[0] == 2, f"Shape is {rev_flow.shape[0]}"
+        print(flow.device, rev_flow.device)
+        # assert flow.device == 'cpu', 'flow needs to be on cpu'
+        # assert rev_flow.device == 'cpu', 'rev_flow needs to be on cpu'
         # ========= end of sanity checks ============
 
         self.style_img, self.content_img, self.prev_frame_img = self.get_images(content, style, prev_out)
 
-        p_content, p_style, p_prev_frame = self.proc.preprocess(self.content_img).to(self.device), self.proc.preprocess(self.style_img).to(self.device), self.proc.preprocess(self.prev_frame_img).cpu()
+        p_content = self.proc.preprocess(self.content_img).to(self.device)
+        p_style = self.proc.preprocess(self.style_img).to(self.device)
+        p_prev_frame = self.proc.preprocess(self.prev_frame_img).cpu()
 
+        # compute gram matrices and feature maps to plug into the loss
         actual_gram_matrices, _ = self.ext(p_style)
         _, actual_content_outputs = self.ext(p_content)
 
-        ##### CPU #############
+        ##### CPU computation #############
 
         prev_warped = self.warp(p_prev_frame.squeeze(0), rev_flow).unsqueeze(0) # note that we are using the reverse flow because of the semantics of cv2.remap
 
-        stt_mask = self.get_mask_disoccluded(flow, rev_flow) & self.get_mask_edge(rev_flow) # short term temporal consistency mask
+        disocc_mask = self.get_mask_disoccluded(flow, rev_flow)
+        edge_mask = self.get_mask_edge(rev_flow)
+        stt_mask = disocc_mask & edge_mask # short term temporal consistency mask
 
         ##### CPU computation done #############
 
@@ -143,55 +173,119 @@ class VideoStyleTransfer:
         ### Saving masks and warped images for debugging ##########
 
         self.proc.postprocess(prev_warped.clone()).save(f'output_flows/warped_{i}.jpg')
-        disocc_mask = self.get_mask_disoccluded(flow.cpu(), rev_flow.cpu())
-        edge_mask = self.get_mask_edge(rev_flow.cpu()) 
-        stt_mask = disocc_mask & edge_mask 
-        mask_img = torch.ones(prev_warped.shape, dtype=torch.uint8)*255
-        mask_img[:, :, ~edge_mask] = 0
-        write_jpeg(mask_img.cpu().squeeze(0), f'output_flows/edge_mask_{i}.jpg')
-        mask_img = torch.ones(prev_warped.shape, dtype=torch.uint8)*255
+        mask_img = torch.ones_like(prev_warped, dtype=torch.uint8, device='cpu')*255
+        mask_img[:, :, ~edge_mask] = 0 # @masked regions the image is black
+        write_jpeg(mask_img.squeeze(0), f'output_flows/edge_mask_{i}.jpg')
+        mask_img[:, :, :] = 255
         mask_img[:, :, ~disocc_mask] = 0
-        write_jpeg(mask_img.squeeze(0).cpu(), f'output_flows/disocc_mask_{i}.jpg')
-        mask_img = torch.ones(prev_warped.shape, dtype=torch.uint8)*255
+        write_jpeg(mask_img.squeeze(0), f'output_flows/disocc_mask_{i}.jpg')
+        mask_img[:, :, :] = 255
         mask_img[:, :, ~stt_mask] = 0
         write_jpeg(mask_img.cpu().squeeze(0), f'output_flows/mask_{i}.jpg')
 
         ### End of Saving masks and warped images for debugging ##########
 
-        # noise_img = prev_warped.clone()
-        noise_img = p_content.clone()
+        # global noise_img
+        # prev_warped = prev_warped.clip(0, 255)
+        # print('ok, here goes', noise_img.device, prev_warped.device)
+        noise_img = prev_warped.clone()
+        print('have set the thing to equal, duh!!')
+        print('ok, here goes', noise_img.device, prev_warped.device)
+        print(torch.allclose(noise_img, prev_warped), '0')
+        if not torch.allclose(noise_img, prev_warped):
+            print(torch.isnan(noise_img).nonzero())
+            print(torch.isnan(prev_warped).nonzero())
+            print('duhhh, it happened')
+            import matplotlib.pyplot as plt
+
+            abs_diff = torch.abs(noise_img - prev_warped)
+            plt.imshow(abs_diff[0].permute(1, 2, 0).numpy())
+            plt.savefig('random/OKOKOKOK.png')
+            # print(noise_img[0][2])
+            # print(prev_warped[0][2])
+            print(noise_img - prev_warped)
+            idxs = (noise_img - prev_warped).nonzero()
+            print(idxs)
+            print(noise_img[idxs], prev_warped[idxs])
+            print('start')
+            print(np.linalg.norm((noise_img.detach() - prev_warped)/255))
+            print(torch.mean(stt_mask * torch.square(noise_img.detach()-prev_warped)).item())
+            print(np.allclose(noise_img.detach(), prev_warped), '5')
+            # exit()
+            # print(stt_mask.shape, torch.square(noise_img-prev_warped).shape)
+            print('end')
+            prev_warped[prev_warped.isnan()] = 0.
+            noise_img = prev_warped.clone()
+            print('now?\n', torch.allclose(noise_img, prev_warped))
+            exit()
+        # noise_img = p_content.clone()
         noise_img.requires_grad = True
         num_iter = [0]
         iter_range = tqdm(range(num_steps))
         lr = 1
-        optimizer = torch.optim.LBFGS([noise_img], max_iter=1, lr=lr)
+        # optimizer = torch.optim.LBFGS([noise_img], max_iter=1, lr=lr)
+        optimizer = torch.optim.Adam([noise_img], lr=lr)
+        # print(torch.sum(prev_warped == prev_warped.clip(0, 255)))
+        # print(prev_warped.shape[1] * prev_warped.shape[2] * prev_warped.shape[3])
 
         def closure():
+            print('closure called')
+            # global noise_img
+            print(torch.allclose(noise_img, prev_warped), '1')
             iter_range.update()
+            self.proc.postprocess(noise_img.detach().clone()).save(f'random/noise_{i}_{num_iter[0]}.jpg')
+            print(torch.allclose(noise_img, prev_warped), '2')
             style_outputs, content_outputs = self.ext(noise_img)
+            # self.proc.postprocess(noise_img.clone()).save(f'random/noise_{i}_{num_iter[0]}2.jpg')
+            print(torch.allclose(noise_img, prev_warped), '3')
             loss = 0.
             num_iter[0] += 1
+            content_loss = style_loss = 0.
             for key, val in style_outputs.items():
-                loss += self.style_weights[key] * nn.functional.mse_loss(style_outputs[key], actual_gram_matrices[key])
+                style_loss += self.style_weights[key] * F.mse_loss(val, actual_gram_matrices[key])
             for key, val in content_outputs.items():
-                loss += self.content_weights[key]*nn.functional.mse_loss(val, actual_content_outputs[key])
-
+                content_loss += self.content_weights[key] * F.mse_loss(val, actual_content_outputs[key])
+            h, w = prev_warped.shape[2], prev_warped.shape[3]
+            style_loss /= ((h * w))
+            loss = style_loss + content_loss
+            print(torch.allclose(noise_img, prev_warped), '4')
             ## add the short term temporal consistency loss
-            stt_loss = self.stt_weight * torch.mean(torch.square(noise_img - prev_warped)[:, :, stt_mask[:, :]])
-            # print("stt_loss =", stt_loss)
-            # loss += stt_loss
+            print('start')
+            print(np.linalg.norm((noise_img.detach() - prev_warped)/255))
+            print(torch.mean(stt_mask * torch.square(noise_img.detach()-prev_warped)).item())
+            print(np.allclose(noise_img.detach(), prev_warped), '5')
+            # exit()
+            # print(stt_mask.shape, torch.square(noise_img-prev_warped).shape)
+            print('end')
+            # noise_img2 = torch.clip(noise_img, 0, 255)
+            stt_loss = self.stt_weight * torch.mean(stt_mask * torch.square(noise_img - prev_warped))
+            print('style_loss =', style_loss.item())
+            print('content_loss =', content_loss.item())
+            print("stt_loss =", stt_loss.item())
+            loss += stt_loss
   
             optimizer.zero_grad()
             loss.backward()
+            print(torch.max(noise_img.grad))
+            torch.nn.utils.clip_grad_value_(noise_img, clip_value=10)
+            print(torch.max(noise_img.grad))
             return loss
+        
         for _ in range(num_steps):
             optimizer.step(closure)
+        # exit()
 
-        corr_img = noise_img.clone()
+        corr_img = noise_img.detach().clone()
         corr_img = self.proc.postprocess(corr_img)
         if save_path is not None:
             corr_img.save(save_path)
         return corr_img
+    
+    def squared_norm(self, obj: torch.Tensor) -> torch.Tensor:
+        """
+            computes the element wise squared norm of tensor with shape (2, H, W). Norm is taken over the first dimension.
+        """
+        return (obj * obj).sum(dim=0)
 
 def get_frames(in_dir, video_name, video_ext):
     """
@@ -225,75 +319,116 @@ def num_frames(in_dir, video_name, video_ext):
         raise NotImplementedError("Skill Issue")
     return n_frames
 
-if __name__ == "__main__":
+def prepare():
     parser = argparse.ArgumentParser()
+    parser.add_argument('-seed', type=int, default=42)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--load_cached_flows", action="store_true")
+    # parser.add_argument('--video', action='store_true')
+    parser.add_argument('-videoname', type=str, default='dragon.gif')
+    parser.add_argument('-stylename', type=str, default='aframov.jpg')
+    parser.add_argument('-indir', type=str, default='input')
+    parser.add_argument('-middir', type=str, default='output_frames')
+    parser.add_argument('-outdir', type=str, default='output')
+    parser.add_argument('-step', type=int, default=1)
     args = parser.parse_args()
-    # video_name = "pexelscom_pavel_danilyuk_basketball_hd"
-    video_name = "dragon"
-    # video_ext = "mp4"
-    video_ext = "gif"
-    style_name = "rain-princess-aframov"
-    style_ext = "jpg"
-    in_dir = 'input'
-    mid_dir= "output_frames"
-    out_dir = "output"
-    step = 1
+    
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+
+    args.videoname, videoext = args.videoname.split('.')
+    args.stylename, styleext = args.stylename.split('.')
+    if args.videoname in abbrev_to_full:
+        args.videoname = abbrev_to_full[args.videoname]
+    if args.stylename in abbrev_to_full:
+        args.stylename = abbrev_to_full[args.stylename]
+    # prepare directory structure
+    assert os.path.isdir(args.indir), 'invalid input directory'
+    if not args.force:
+        assert os.path.isdir(args.middir), 'invalid mid directory'
+        assert os.path.isdir(args.outdir), 'invalid output directory'
+        return args, videoext, styleext
+    
+    for dirname in ['mid', 'out']:
+        dirname = getattr(args, dirname+'dir')
+        if os.path.isdir(dirname): 
+            shutil.rmtree(dirname)
+        os.mkdir(dirname) 
+    if not os.path.isdir('output_flows'):
+        os.mkdir('output_flows')
+        
+    return args, videoext, styleext
+
+if __name__ == "__main__":
+    args, video_ext, style_ext = prepare()
+    video_name = args.videoname
+    style_name = args.stylename
+    in_dir = args.indir
+    mid_dir = args.middir
+    out_dir = args.outdir
+    step = args.step
     img_size = None
     n_frames = num_frames(in_dir, video_name, video_ext)
     
-    if args.force:
-        input_frames = get_frames(in_dir, video_name, video_ext)
-        img_size = tuple([i-i%8 for i in input_frames.shape[2:]])
-        input_frames = transforms.Resize(img_size)(input_frames)
-        list_frames = []
-        for i in range(input_frames.shape[0]):
-            if i % step == 0:
-                list_frames.append(input_frames[i])
-                write_jpeg(input_frames[i], f"{mid_dir}/{video_name[:6]}_frame_{i//step}.jpg")
-
-        input_frames = torch.stack(list_frames) # input frames reduced using step
-
-        if not args.load_cached_flows:
-            print("Computing forward optical flows...")
-            optical_flow = generate_optical_flow(input_frames, reverse=True).cpu()
-            print("Computing backward optical flows...")
-            reverse_optical_flow = generate_optical_flow(input_frames, reverse=False).cpu()
-            
-            # store the optical flows
-            torch.save(optical_flow, 'optical_flow.pt')
-            torch.save(reverse_optical_flow, 'reverse_optical_flow.pt')
-        
-        else:
-            optical_flow = torch.load('optical_flow.pt').cpu()
-            reverse_optical_flow = torch.load('reverse_optical_flow.pt').cpu()
-
-        for i in range(len(input_frames)):
-            print("========iter: ", i, "============")
-            torch.cuda.empty_cache()
-            if i == 0:
-                if args.load_cached_flows:
-                    continue
-                image_style_transfer = ImageStyleTransfer(img_size)
-                image_style_transfer(
-                    f"{mid_dir}/{video_name[:6]}_frame_{i}.jpg", 
-                    f'{in_dir}/{style_name}.{style_ext}', 
-                    save_path=f"{mid_dir}/{video_name[:6]}_processed_frame_{i}.jpg", 
-                    init_img=None, 
-                    num_steps=500
-                )
-            else:
-                video_style_transfer = VideoStyleTransfer(img_size)
-                video_style_transfer(
-                    f'{mid_dir}/{video_name[:6]}_frame_{i}.jpg', 
-                    f'{in_dir}/{style_name}.{style_ext}', 
-                    optical_flow[i-1],
-                    f'{mid_dir}/{video_name[:6]}_processed_frame_{i-1}.jpg',
-                    reverse_optical_flow[i-1],
-                    save_path=f"{mid_dir}/{video_name[:6]}_processed_frame_{i}.jpg", 
-                    num_steps=500
-                )
-            
-    combine_as_gif(f'{video_name[:6]}_processed_frame_', 'jpg', mid_dir, out_dir, (n_frames-1)//step, 1, f'{video_name[:6]}_{style_name[:6]}.gif')
+    if not args.force:
+        combine_as_gif(
+            f'{full_to_abbrev[video_name]}_processed_frame_', 'jpg', 
+            mid_dir, out_dir, 1+(n_frames-1)//step, step, 
+            f'{full_to_abbrev[video_name]}_{full_to_abbrev[style_name]}.gif')
+        exit()
     
+    input_frames = get_frames(in_dir, video_name, video_ext)
+    img_size = tuple([i-i%8 for i in input_frames.shape[2:]]) # optical flow needs multiple of 8
+    # img_size = [128,320]
+    input_frames = transforms.Resize(img_size)(input_frames)
+    list_frames = []
+    for i in range(input_frames.shape[0]):
+        if i % step == 0:
+            list_frames.append(input_frames[i])
+            write_jpeg(input_frames[i], f"{mid_dir}/{full_to_abbrev[video_name]}_frame_{i//step}.jpg")
+
+    input_frames = torch.stack(list_frames) # input frames reduced using step
+
+    if not args.load_cached_flows:
+        print("Computing forward optical flows...")        
+        optical_flow = generate_optical_flow(input_frames, reverse=True).cpu()
+        print("Computing backward optical flows...")
+        reverse_optical_flow = generate_optical_flow(input_frames, reverse=False).cpu()
+        
+        # store the optical flows
+        torch.save(optical_flow, 'optical_flow.pt')
+        torch.save(reverse_optical_flow, 'reverse_optical_flow.pt')
+    
+    else:
+        optical_flow = torch.load('optical_flow.pt').cpu()
+        reverse_optical_flow = torch.load('reverse_optical_flow.pt').cpu()
+
+    for i in range(len(input_frames)):
+        print("========iter: ", i, "============")
+        torch.cuda.empty_cache()
+        if i == 0:
+            # if args.load_cached_flows:
+            #     continue
+            image_style_transfer = ImageStyleTransfer(img_size)
+            image_style_transfer(
+                f"{mid_dir}/{full_to_abbrev[video_name]}_frame_{i}.jpg", 
+                f'{in_dir}/{style_name}.{style_ext}', 
+                save_path=f"{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
+                init_img=None, 
+                num_steps=100
+            )
+        else:
+            video_style_transfer = VideoStyleTransfer(img_size)
+            video_style_transfer(
+                f'{mid_dir}/{full_to_abbrev[video_name]}_frame_{i}.jpg', 
+                f'{in_dir}/{style_name}.{style_ext}', 
+                optical_flow[i-1].to('cpu'),
+                f'{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i-1}.jpg',
+                reverse_optical_flow[i-1].to('cpu'),
+                save_path=f"{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
+                num_steps=200
+            )
+    combine_as_gif(f'{full_to_abbrev[video_name]}_processed_frame_', 'jpg', mid_dir, out_dir, 1+(n_frames-1)//step, 1, f'{full_to_abbrev[video_name]}_{full_to_abbrev[style_name]}.gif')
+            
+

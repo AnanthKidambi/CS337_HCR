@@ -100,6 +100,7 @@ class ImageStyleTransfer:
         optimizer = torch.optim.LBFGS([noise_img], max_iter=1, lr=lr)
         def closure():
             iter_range.update()
+            self.proc.postprocess(noise_img.clone()).save(f'random/noise_0_{num_iter[0]}.jpg')
             style_outputs, content_outputs = self.ext(noise_img)
             loss = 0.
             num_iter[0] += 1
