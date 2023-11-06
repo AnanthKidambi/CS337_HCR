@@ -142,10 +142,11 @@ class VideoStyleTransfer:
         p_content = self.proc.preprocess(self.content_img).to(self.device)
         p_style = self.proc.preprocess(self.style_img).to(self.device)
         p_prev_frame = self.proc.preprocess(self.prev_frame_img).cpu()
-        print('check-input', p_style.isnan().nonzero(), p_content.isnan().nonzero(), p_prev_frame.isnan().nonzero())
-        p_style[p_style.isnan()] = 0.
-        p_content[p_content.isnan()] = 0.
-        p_prev_frame[p_prev_frame.isnan()] = 0.
+        print('check-input', p_style.isnan().nonzero(), p_content.isnan().nonzero(), p_prev_frame.isnan().nonzero(), flow.isnan().nonzero(), rev_flow.isnan().nonzero())
+        print('check-input2', p_style.isinf().nonzero(), p_content.isinf().nonzero(), p_prev_frame.isinf().nonzero(), flow.isinf().nonzero(), rev_flow.isinf().nonzero())
+        p_style[p_style.isnan()] = p_style.mean()
+        p_content[p_content.isnan()] = p_content.mean()
+        p_prev_frame[p_prev_frame.isnan()] = p_prev_frame.mean()
 
         # compute gram matrices and feature maps to plug into the loss
         actual_gram_matrices, _ = self.ext(p_style)
@@ -154,9 +155,8 @@ class VideoStyleTransfer:
         ##### CPU computation #############
 
         prev_warped = self.warp(p_prev_frame.squeeze(0), rev_flow).unsqueeze(0) # note that we are using the reverse flow because of the semantics of cv2.remap
-        print('checking...', prev_warped.isnan().nonzero())
-        prev_warped[prev_warped.isnan()] = p_style[prev_warped.isnan()]
-        print('oh hey, is this true:', prev_warped.isinf().nonzero())
+        # print('checking...', prev_warped.isnan().nonzero(), prev_warped.isinf().nonzero())
+        prev_warped[prev_warped.isnan()] = p_prev_frame[prev_warped.isnan()]
         prev_warped[prev_warped.isinf()] = 1<<16
 
         disocc_mask = self.get_mask_disoccluded(flow, rev_flow)
@@ -199,8 +199,6 @@ class VideoStyleTransfer:
         # print('ok, here goes', noise_img.device, prev_warped.device)
         
         noise_img = prev_warped.clone()
-        print('have set the thing to equal, duh!!')
-        print('ok, here goes', noise_img.device, prev_warped.device)
         print(torch.allclose(noise_img, prev_warped), '0')
         if not torch.allclose(noise_img, prev_warped):
             print(torch.isnan(noise_img).nonzero())
@@ -224,7 +222,7 @@ class VideoStyleTransfer:
             # exit()
             # print(stt_mask.shape, torch.square(noise_img-prev_warped).shape)
             print('end')
-            prev_warped[prev_warped.isnan()] = p_style[prev_warped.isnan()]
+            prev_warped[prev_warped.isnan()] = p_prev_frame[prev_warped.isnan()]
             noise_img = prev_warped.clone()
             print('now?\n', torch.allclose(noise_img, prev_warped))
             exit()
@@ -240,14 +238,28 @@ class VideoStyleTransfer:
 
         def closure():
             iter_range.update()
-            self.proc.postprocess(noise_img.detach().clone()).save(f'random/noise_{i}_{num_iter[0]}.jpg')
+            if not num_iter[0] % 50: self.proc.postprocess(noise_img.detach().clone()).save(f'random/noise_{i}_{num_iter[0]}.jpg')
+            if noise_img.isnan().nonzero().shape[0] != 0:
+                print(noise_img.isnan().nonzero())
+                print(prev_warped.isnan().nonzero())
+                print(torch.allclose(noise_img, prev_warped))
+                exit()
+            # noise_img[noise_img.isnan()] = 0.
             style_outputs, content_outputs = self.ext(noise_img)
+            print(noise_img.isnan().nonzero())
+            for val in style_outputs.values():
+                print(val.isnan().nonzero())
+            for val in content_outputs.values():
+                print(val.isnan().nonzero())
+            if len(noise_img.isnan().nonzero()) == 0 and any(len(val.isnan().nonzero()) > 0 for val in style_outputs.values()):
+                print('impossible')
+                exit()    
             loss = 0.
             num_iter[0] += 1
             content_loss = style_loss = 0.
             for key, val in style_outputs.items():
                 # print(actual_gram_matrices[key].isnan().nonzero())
-                # print(val.isnan().nonzero())
+                print(val.isnan().nonzero(), val.isinf().nonzero())
                 style_loss += self.style_weights[key] * F.mse_loss(val, actual_gram_matrices[key])
             for key, val in content_outputs.items():
                 # print(actual_content_outputs[key].isnan().nonzero())
@@ -442,7 +454,7 @@ if __name__ == "__main__":
                 f'{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i-1}.jpg',
                 reverse_optical_flow[i-1].to('cpu'),
                 save_path=f"{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
-                num_steps=100+50*i
+                num_steps=50
             )
     combine_as_gif(f'{full_to_abbrev[video_name]}_processed_frame_', 'jpg', mid_dir, out_dir, 1+(n_frames-1)//step, 1, f'{full_to_abbrev[video_name]}_{full_to_abbrev[style_name]}.gif')
             
