@@ -7,7 +7,7 @@ import warnings
 from tqdm import tqdm
 # warnings.filterwarnings("ignore")
 
-from makegif import combine_as_gif
+from utils import combine_as_gif
 
 device = 'cpu'#torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f'using {device}, optical flows')

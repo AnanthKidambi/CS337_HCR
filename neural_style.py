@@ -6,6 +6,8 @@ from tqdm import tqdm
 from torchvision.models.feature_extraction import create_feature_extractor
 import argparse
 from PIL import Image
+import utils
+import inspect
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -38,36 +40,61 @@ class extractor:
         self.means = [0.48501961, 0.45795686, 0.40760392]
         self.std = [0.229, 0.224, 0.225]
     def extract(self, img):
+        debug = utils.debug
         img2 = transforms.Normalize(mean=self.means, std=self.std)(img)
-        print('hah:', img2.isnan().nonzero())
+        if debug: 
+            if img2.isnan().any() or img2.isinf().any():
+                print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
+                import IPython
+                IPython.embed()
+                exit()   
         out = self.extractor(img2)
-        print('haha:', [outv.isnan().nonzero() for outv in out.values()])
-        print('aha:', img.shape, [outv.shape for outv in out.values()])
+        if debug: 
+            for outv in out.values():
+                if outv.isnan().any() or outv.isinf().any():
+                    print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
+                    import IPython
+                    IPython.embed()
+                    exit()
         # for outv in out.values():
         #     outv[outv.isnan()] = outv.mean()
         for key in out:
             out[key] = torch.where(out[key].isnan(), torch.zeros_like(out[key]), out[key])
         
-        print('DUH:', [outv.isnan().nonzero() for outv in out.values()])
+        if debug: 
+            for outv in out.values():
+                if outv.isnan().any() or outv.isinf().any():
+                    print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
+                    import IPython
+                    IPython.embed()
+                    exit()
         return {key: val for key, val in out.items() if key in self.style_layers.values()}, {key: val for key, val in out.items() if key in self.content_layers.values()}
     def __call__(self, img):
+        debug = utils.debug
         style_out, content_out = self.extract(img)
         flat = {key: val.view(val.shape[1], -1) for key, val in style_out.items()}
-        print('nan:', [flat[key].isnan().nonzero() for key in flat])
+        if debug: 
+            for key in flat:
+                if flat[key].isnan().any() or flat[key].isinf().any():
+                    print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
+                    import IPython
+                    IPython.embed()
+                    exit()
         # gram = {key: torch.matmul(val, val.t()) for key, val in flat.items()}
-        print('shape:', [flat[key].shape[1] for key in flat])
+        # if debug: 
+        #     print('shape:', [flat[key].shape[1] for key in flat])
         gram = {key: torch.matmul(val, val.t()).div_(val.shape[1]) for key, val in flat.items()}
-        print('nan:', [gram[key].isnan().nonzero() for key in gram])
+        if debug: print('nan:', [gram[key].isnan().nonzero() for key in gram])
         for key in gram:
             gram[key] = torch.where(gram[key].isnan(), torch.zeros_like(gram[key]), gram[key])
-        print('DUH:', [outv.isnan().nonzero() for outv in gram.values()])
+        if debug: print('DUH:', [outv.isnan().nonzero() for outv in gram.values()])
         assert all(val1.shape[2] * val1.shape[3] == val2.shape[1] for val1, val2 in zip(style_out.values(), flat.values()))
         return gram, content_out
 
 class ImageStyleTransfer:
     def __init__(self, img_size) -> None:
 
-        self.device = 'cpu'#torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Device being used:", self.device)
         # pre_means = [0.485, 0.456, 0.406]
         self.pre_means = [0.48501961, 0.45795686, 0.40760392]
