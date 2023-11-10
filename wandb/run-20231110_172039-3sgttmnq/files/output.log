@@ -1,0 +1,30 @@
+========iter:  0 ============
+Device being used: cuda
+Traceback (most recent call last):
+  File "/users/ug21/jvaditya/CS337_Project/CS337_HCR/video_style.py", line 543, in <module>
+    image_style_transfer(
+  File "/users/ug21/jvaditya/CS337_Project/CS337_HCR/neural_style.py", line 143, in __call__
+    actual_gram_matrices, _ = self.ext(p_style)
+  File "/users/ug21/jvaditya/CS337_Project/CS337_HCR/neural_style.py", line 81, in __call__
+    style_out, content_out = self.extract(img)
+  File "/users/ug21/jvaditya/CS337_Project/CS337_HCR/neural_style.py", line 54, in extract
+    out = self.extractor(img2)
+  File "/users/ug21/jvaditya/CS337_Project/lib/python3.9/site-packages/torch/fx/graph_module.py", line 678, in call_wrapped
+    return self._wrapped_call(self, *args, **kwargs)
+  File "/users/ug21/jvaditya/CS337_Project/lib/python3.9/site-packages/torch/fx/graph_module.py", line 274, in __call__
+    return super(self.cls, obj).__call__(*args, **kwargs)  # type: ignore[misc]
+  File "/users/ug21/jvaditya/CS337_Project/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/users/ug21/jvaditya/CS337_Project/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "<eval_with_key>.5 from /users/ug21/jvaditya/CS337_Project/lib/python3.9/site-packages/torchvision/models/vgg.py:65 in forward", line 5, in forward
+    features_0 = getattr(self.features, "0")(x);  x = None
+  File "/users/ug21/jvaditya/CS337_Project/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1518, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+  File "/users/ug21/jvaditya/CS337_Project/lib/python3.9/site-packages/torch/nn/modules/module.py", line 1527, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/users/ug21/jvaditya/CS337_Project/lib/python3.9/site-packages/torch/nn/modules/conv.py", line 460, in forward
+    return self._conv_forward(input, self.weight, self.bias)
+  File "/users/ug21/jvaditya/CS337_Project/lib/python3.9/site-packages/torch/nn/modules/conv.py", line 456, in _conv_forward
+    return F.conv2d(input, weight, bias, self.stride,
+KeyboardInterrupt

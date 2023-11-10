@@ -41,9 +41,12 @@ class extractor:
         self.std = [0.229, 0.224, 0.225]
     def extract(self, img):
         debug = utils.debug
+        high_val = utils.high_val
+
         img2 = transforms.Normalize(mean=self.means, std=self.std)(img)
         if debug: 
-            if img2.isnan().any() or img2.isinf().any():
+            # if img2.isnan().any() or img2.isinf().any():
+            if img2.isnan().any() or (torch.max(torch.abs(img2)) >= high_val):
                 print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
                 import IPython
                 IPython.embed()
@@ -51,7 +54,8 @@ class extractor:
         out = self.extractor(img2)
         if debug: 
             for outv in out.values():
-                if outv.isnan().any() or outv.isinf().any():
+                # if outv.isnan().any() or outv.isinf().any():
+                if outv.isnan().any() or (torch.max(torch.abs(outv)) >= high_val):
                     print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
                     import IPython
                     IPython.embed()
@@ -63,7 +67,8 @@ class extractor:
         
         if debug: 
             for outv in out.values():
-                if outv.isnan().any() or outv.isinf().any():
+                # if outv.isnan().any() or outv.isinf().any():
+                if outv.isnan().any() or (torch.max(torch.abs(outv)) >= high_val):
                     print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
                     import IPython
                     IPython.embed()
@@ -71,11 +76,14 @@ class extractor:
         return {key: val for key, val in out.items() if key in self.style_layers.values()}, {key: val for key, val in out.items() if key in self.content_layers.values()}
     def __call__(self, img):
         debug = utils.debug
+        high_val = utils.high_val
+        
         style_out, content_out = self.extract(img)
         flat = {key: val.view(val.shape[1], -1) for key, val in style_out.items()}
         if debug: 
             for key in flat:
-                if flat[key].isnan().any() or flat[key].isinf().any():
+                # if flat[key].isnan().any() or flat[key].isinf().any():
+                if flat[key].isnan().any() or (torch.max(torch.abs(flat[key])) >= high_val):
                     print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
                     import IPython
                     IPython.embed()

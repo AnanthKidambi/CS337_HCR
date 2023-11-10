@@ -1,0 +1,1 @@
+{"loss": 127987.046875, "content_loss": 75932.671875, "style_loss": 40386.65625, "stt_loss": 11667.72265625, "_timestamp": 1699612292.712026, "_runtime": 57.97075176239014, "_step": 1999, "max-noise-img": 209.2734375, "_wandb": {"runtime": 71}}
