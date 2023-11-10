@@ -6,5 +6,6 @@ output_frames/*
 __pycache__/*
 *.pt
 random/*
-wandb/*
+wandb/**
+output/*
 

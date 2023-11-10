@@ -14,16 +14,14 @@ print(f'using {device}, optical flows')
 
 #calculate optical flow of all frames in a video
 def generate_optical_flow(input_frames : torch.Tensor, reverse : bool = False):
-    # input_frames, _, _ = read_video(video_path, output_format="TCHW", pts_unit='sec')
-    # print(input_frames.shape, input_frames.device)
     _input_frames = input_frames.to(device)
     weights = Raft_Large_Weights.DEFAULT
     transforms = weights.transforms()
 
-    img1_batch = _input_frames[:-1]
-    img2_batch = _input_frames[1:]
+    img1_batch = _input_frames[:-1] # frames corresponding to indices 0, 1, 2, .... n-1
+    img2_batch = _input_frames[1:]  # frames corresponding to indices 1, 2, .... n
     def preprocess(batch1, batch2):
-        batch1 = functional.resize(batch1, size=((batch1.shape[2]//8)*8, (batch1.shape[3]//8)*8), antialias=False)
+        batch1 = functional.resize(batch1, size=((batch1.shape[2]//8)*8, (batch1.shape[3]//8)*8), antialias=False)  # resize the images to nearest multiple of 8 for RAFT to work
         batch2 = functional.resize(batch2, size=((batch2.shape[2]//8)*8, (batch2.shape[3]//8)*8), antialias=False)
         return transforms(batch1, batch2)
     

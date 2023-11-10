@@ -39,6 +39,7 @@ class extractor:
         self.extractor = create_feature_extractor(self.model, {**self.style_layers, **self.content_layers})
         self.means = [0.48501961, 0.45795686, 0.40760392]
         self.std = [0.229, 0.224, 0.225]
+        
     def extract(self, img):
         debug = utils.debug
         high_val = utils.high_val
