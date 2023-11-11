@@ -3,13 +3,14 @@ from torchvision.io import read_video, write_jpeg
 from torchvision.models.optical_flow import Raft_Large_Weights, raft_large
 from torchvision.transforms import functional
 from torchvision.utils import flow_to_image
-import warnings
+# import warnings
 from tqdm import tqdm
 # warnings.filterwarnings("ignore")
 
 from utils import combine_as_gif
+import utils
 
-device = 'cpu'#torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device(utils.device if torch.cuda.is_available() else "cpu")
 print(f'using {device}, optical flows')
 
 #calculate optical flow of all frames in a video

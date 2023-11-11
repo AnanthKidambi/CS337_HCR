@@ -10,6 +10,9 @@ high_val = np.inf
 global seed
 seed = 69
 
+global device
+device = 'cuda:3'
+
 def combine_as_gif(base : str, ext, in_dir, out_dir, num_images, step, gifname):
     images = [imageio.imread(f'{in_dir}/{base}{i}.{ext}') for i in range(num_images)]
     print(len(images))

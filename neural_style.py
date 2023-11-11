@@ -68,7 +68,6 @@ class extractor:
         
         if debug: 
             for outv in out.values():
-                # if outv.isnan().any() or outv.isinf().any():
                 if outv.isnan().any() or (torch.max(torch.abs(outv)) >= high_val):
                     print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
                     import IPython
@@ -83,15 +82,12 @@ class extractor:
         flat = {key: val.view(val.shape[1], -1) for key, val in style_out.items()}
         if debug: 
             for key in flat:
-                # if flat[key].isnan().any() or flat[key].isinf().any():
                 if flat[key].isnan().any() or (torch.max(torch.abs(flat[key])) >= high_val):
                     print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
                     import IPython
                     IPython.embed()
                     exit()
-        # gram = {key: torch.matmul(val, val.t()) for key, val in flat.items()}
-        # if debug: 
-        #     print('shape:', [flat[key].shape[1] for key in flat])
+
         gram = {key: torch.matmul(val, val.t()).div_(val.shape[1]) for key, val in flat.items()}
         if debug: print('nan:', [gram[key].isnan().nonzero() for key in gram])
         for key in gram:
@@ -103,7 +99,7 @@ class extractor:
 class ImageStyleTransfer:
     def __init__(self, img_size) -> None:
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(utils.device if torch.cuda.is_available() else "cpu")
         print("Device being used:", self.device)
         # pre_means = [0.485, 0.456, 0.406]
         self.pre_means = [0.48501961, 0.45795686, 0.40760392]

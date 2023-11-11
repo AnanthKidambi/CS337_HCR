@@ -1,13 +1,10 @@
 import torch
 import torchvision.models  as models
 import torchvision.transforms as transforms
-import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
-from torchvision.models.feature_extraction import create_feature_extractor
 from PIL import Image
 from torchvision.io import read_video, write_jpeg
-import cv2
 import numpy as np
 import random
 from utils import combine_as_gif
@@ -29,7 +26,7 @@ use_wandb = None
 abbrev_to_full = {
         'pexel': 'pexelscom_pavel_danilyuk_basketball_hd',
         'aframov': 'rain-princess-aframov',
-        'vangogh': 'vangogh-starry-night',
+        'vangogh': 'vangogh_starry_night',
         'oil': 'oil-crop',
         'dragon': 'dragon',
 }
@@ -39,7 +36,7 @@ full_to_abbrev = {v:k for k,v in abbrev_to_full.items()}
 class VideoStyleTransfer:
     def __init__(self, img_size) -> None:
         # self.device = 'cpu'
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(utils.device if torch.cuda.is_available() else "cpu")
         print("Device being used:", self.device)
         # pre_means = [0.485, 0.456, 0.406]
         self.pre_means = [0.48501961, 0.45795686, 0.40760392]
@@ -52,12 +49,14 @@ class VideoStyleTransfer:
         self.content_layers = {f"features.{content_layer_num}": "relu4_2"}
         self.style_layers = {f"features.{i}": f"relu{j+1}_1" for j, i in enumerate(style_layer_nums)} # hardcoded layer names
 
-        # _style_wt_list = [1e3/n**2 for n in [64,128,256,512,512]]
+        # _style_wt_list = [1e3/n**2 for n in [64, 128, 256, 512, 512]]
         _style_wt_list = [0.2]*5
         self.style_weights = {val:_style_wt_list[j] for j, val in enumerate(self.style_layers.values())}
-        _content_wt_list = [1.0]
+        # _content_wt_list = [1.0]
+        _content_wt_list = [0.2]
         self.content_weights = {val:_content_wt_list[j] for j, val in enumerate(self.content_layers.values())}
-        self.stt_weight = 2e2 # short term temporal consistency weight
+        # self.stt_weight = 2e2 # short term temporal consistency weight
+        self.stt_weight = 2e1 # short term temporal consistency weight
 
         self.model = self.get_model()
         self.content_img = None
@@ -322,7 +321,7 @@ class VideoStyleTransfer:
             if debug: 
                 print('tv_loss=', tv_loss.item())
 
-            loss += tv_loss
+            # loss += tv_loss
 
             if use_wandb:
                 wandb.log({'loss' : loss.item(), 'content_loss': content_loss.item(), 'style_loss' : style_loss.item(), 'stt_loss' : stt_loss.item(), 'tv_loss' : tv_loss.item()})
@@ -427,14 +426,15 @@ def prepare():
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--load_cached_flows", action="store_true")
-    parser.add_argument('-videoname', type=str, default='dragon.gif')
-    parser.add_argument('-stylename', type=str, default='aframov.jpg')
+    parser.add_argument('--videoname', type=str, default='dragon.gif')
+    parser.add_argument('--stylename', type=str, default='aframov.jpg')
     parser.add_argument('-indir', type=str, default='input')
     parser.add_argument('-middir', type=str, default='output_frames')
     parser.add_argument('-outdir', type=str, default='output')
     parser.add_argument('-step', type=int, default=1)
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--wandb', action='store_true')
+    parser.add_argument('--no_stt', action='store_true')
     args = parser.parse_args()
     
     torch.cuda.empty_cache()
@@ -523,7 +523,7 @@ if __name__ == "__main__":
     for i in range(len(input_frames)):
         print("========iter: ", i, "============")
         torch.cuda.empty_cache()
-        if i == 0:
+        if args.no_stt:
             image_style_transfer = ImageStyleTransfer(img_size)
             image_style_transfer(
                 f"{mid_dir}/{full_to_abbrev[video_name]}_frame_{i}.jpg", 
@@ -533,16 +533,26 @@ if __name__ == "__main__":
                 num_steps=100
             )
         else:
-            video_style_transfer = VideoStyleTransfer(img_size)
-            video_style_transfer(
-                f'{mid_dir}/{full_to_abbrev[video_name]}_frame_{i}.jpg', 
-                f'{in_dir}/{style_name}.{style_ext}', 
-                optical_flow[i-1].to('cpu'),
-                f'{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i-1}.jpg',
-                reverse_optical_flow[i-1].to('cpu'),
-                save_path=f"{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
-                num_steps=50
-            )
+            if i == 0:
+                image_style_transfer = ImageStyleTransfer(img_size)
+                image_style_transfer(
+                    f"{mid_dir}/{full_to_abbrev[video_name]}_frame_{i}.jpg", 
+                    f'{in_dir}/{style_name}.{style_ext}', 
+                    save_path=f"{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
+                    init_img=None, 
+                    num_steps=100
+                )
+            else:
+                video_style_transfer = VideoStyleTransfer(img_size)
+                video_style_transfer(
+                    f'{mid_dir}/{full_to_abbrev[video_name]}_frame_{i}.jpg', 
+                    f'{in_dir}/{style_name}.{style_ext}', 
+                    optical_flow[i-1].to('cpu'),
+                    f'{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i-1}.jpg',
+                    reverse_optical_flow[i-1].to('cpu'),
+                    save_path=f"{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
+                    num_steps=100
+                )
     print("Creating GIF.....")
     combine_as_gif(f'{full_to_abbrev[video_name]}_processed_frame_', 'jpg', mid_dir, out_dir, 1 + (n_frames - 1)//step, 1, f'{full_to_abbrev[video_name]}_{full_to_abbrev[style_name]}.gif')
     print("Done!")
