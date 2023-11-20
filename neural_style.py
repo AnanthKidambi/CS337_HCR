@@ -74,7 +74,8 @@ class extractor:
                     IPython.embed()
                     exit()
         return {key: val for key, val in out.items() if key in self.style_layers.values()}, {key: val for key, val in out.items() if key in self.content_layers.values()}
-    def __call__(self, img):
+    def __call__(self, img, normalize = False):
+        # normalize = False
         debug = utils.debug
         high_val = utils.high_val
         
@@ -87,12 +88,20 @@ class extractor:
                     import IPython
                     IPython.embed()
                     exit()
-
-        gram = {key: torch.matmul(val, val.t()).div_(val.shape[1]) for key, val in flat.items()}
-        if debug: print('nan:', [gram[key].isnan().nonzero() for key in gram])
+        if normalize:
+            gram = {key: torch.matmul(val, val.t()).div_(4.0*val.numel()) for key, val in flat.items()}
+        else:
+            gram = {key: torch.matmul(val, val.t()).div_(val.shape[1]) for key, val in flat.items()}
+        if debug: 
+            for key, _ in gram.items():
+                if gram[key].isnan().any():
+                    print('nan:', [gram[key].isnan().nonzero() for key in gram])
         for key in gram:
             gram[key] = torch.where(gram[key].isnan(), torch.zeros_like(gram[key]), gram[key])
-        if debug: print('DUH:', [outv.isnan().nonzero() for outv in gram.values()])
+        if debug: 
+            for key, _ in gram.items():
+                if gram[key].isnan().any():
+                    print('DUH:', [outv.isnan().nonzero() for outv in gram.values()])
         assert all(val1.shape[2] * val1.shape[3] == val2.shape[1] for val1, val2 in zip(style_out.values(), flat.values()))
         return gram, content_out
 

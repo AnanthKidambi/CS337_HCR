@@ -11,7 +11,7 @@ from utils import combine_as_gif
 import utils
 
 device = torch.device(utils.device if torch.cuda.is_available() else "cpu")
-print(f'using {device}, optical flows')
+# print(f'using {device}, optical flows')
 
 #calculate optical flow of all frames in a video
 def generate_optical_flow(input_frames : torch.Tensor, reverse : bool = False):
