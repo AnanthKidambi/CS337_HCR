@@ -95,12 +95,16 @@ class VideoStyleTransfer:
 
         def transform_function(coords):
             coords_ = np.flip(np.asarray(coords, dtype=int), axis=1)
-            coords_ = coords_[:, 0]*flow_map[0].shape[1] + coords_[:, 1]
+            coords_ = coords_[:, 0]*flow_map.shape[2] + coords_[:, 1]
 
             flat_flow0 = flow_map[0].flatten()
             flat_flow1 = flow_map[1].flatten()
 
             return np.concatenate([flat_flow0[coords_][:, np.newaxis], flat_flow1[coords_][:, np.newaxis]], axis=1)
+
+        # skimage supports all channels at once, maybe do that?
+        # templ_merged = skimage.transform.warp(p_image.numpy(), transform_function)    # add preserve_range
+        # return torch.tensor(templ_merged).cpu()
 
         for chan in range(p_image.shape[0]):
             temp_merged = skimage.transform.warp(p_image[chan].numpy(), transform_function)    # add preserve_range
@@ -113,12 +117,6 @@ class VideoStyleTransfer:
                     exit()
 
             dst.append(torch.tensor(temp_merged))
-            # if debug : 
-            #     temp2 = cv2.remap(p_image[chan].numpy(), flow_map[0].numpy(), flow_map[1].numpy(), interpolation=cv2.INTER_CUBIC, borderMode=cv2.BORDER_TRANSPARENT)
-            #     if not np.nanmean((temp - temp2)**2) < 1e-3:
-            #         print(f"Ipython from line {inspect.currentframe().f_lineno} of video_style.py")
-            #         import IPython
-            #         IPython.embed() 
         return torch.stack(dst).cpu()
     
     def get_mask_disoccluded(self, flow : torch.Tensor, rev_flow : torch.Tensor):
@@ -131,10 +129,15 @@ class VideoStyleTransfer:
         assert flow.device == torch.device("cpu"), 'need cpu in warp (get_mask_disoccluded)'
         assert rev_flow.device == torch.device("cpu"), 'need cpu in warp (get_mask_disoccluded)'
 
-        w_tilde = self.warp(flow, rev_flow)
+        # get w_tilde
+        # To detect disocclusions, we perform a forward-backward consistency check of the optical flow [11]. Let w = (u,v) be the optical flow in forward direction and wˆ = (uˆ,vˆ) the flow in backward direction. Denote by we the forward flow warped to the second image:
+        # we (x, y) = w((x, y) + wˆ (x, y)).
+        to_warp = torch.stack([torch.arange(flow.shape[1]), torch.arange(flow.shape[2])])
+        
+
         ###### plotting the lhs ###########
         from matplotlib import pyplot as plt
-        plt.imshow((self.squared_norm(w_tilde + rev_flow) - (0.03*(self.squared_norm(w_tilde) + self.squared_norm(rev_flow)) + 0.5)).cpu().numpy())
+        plt.imshow((self.squared_norm(w_tilde + rev_flow) - (0.01*(self.squared_norm(w_tilde) + self.squared_norm(rev_flow)) + 0.5)).cpu().numpy())
         plt.savefig("lhs.jpg")
         ###################################
         return (self.squared_norm(w_tilde + rev_flow) <= 
@@ -242,6 +245,7 @@ class VideoStyleTransfer:
         rev_flow = rev_flow.to(self.device)
         p_prev_frame = p_prev_frame.to(self.device)
         prev_warped = prev_warped.to(self.device)
+        # prev_warped[:, :, ~disocc_mask] = p_content[:, :, ~disocc_mask]
         stt_mask= stt_mask.to(self.device)
 
         # ========= sanity checks ============
@@ -259,7 +263,7 @@ class VideoStyleTransfer:
             write_jpeg(mask_img.squeeze(0), f'output_flows/disocc_mask_{i}.jpg')
             mask_img[:, :, :] = 255
             mask_img[:, :, ~stt_mask] = 0
-            write_jpeg(mask_img.cpu().squeeze(0), f'output_flows/mask_{i}.jpg')
+            write_jpeg(mask_img.cpu().squeeze(0), f'output_flows/mask_{i-1}.jpg')
         ### End of Saving masks and warped images for debugging ##########
 
         # prev_warped[:, :, ~disocc_mask] = p_content[:, :, ~disocc_mask]
@@ -316,9 +320,9 @@ class VideoStyleTransfer:
             for key, val in style_outputs.items():
                 if debug and val.isnan().any(): 
                     print(val.isnan().nonzero(), val.isinf().nonzero())
-                style_loss += self.style_weights[key] * F.mse_loss(val, actual_gram_matrices[key]) * val.numel()
+                style_loss += self.style_weights[key] * F.mse_loss(val, actual_gram_matrices[key]) #* val.numel()
             for key, val in content_outputs.items():
-                content_loss += self.content_weights[key] * F.mse_loss(val, actual_content_outputs[key]) * 0.5 * (val.numel()**0.5)
+                content_loss += self.content_weights[key] * F.mse_loss(val, actual_content_outputs[key]) * 0.5 #* (val.numel()**0.5)
             # h, w = prev_warped.shape[2], prev_warped.shape[3]
             # style_loss /= ((h * w))
             # loss = style_loss.clip(0, high_val) + content_loss.clip(0, high_val)  
@@ -583,6 +587,6 @@ if __name__ == "__main__":
     print("Creating GIF.....")
     combine_as_gif(f'{full_to_abbrev[video_name]}_processed_frame_', 'jpg', mid_dir, out_dir, 1 + (n_frames - 1)//step, 1, f'{full_to_abbrev[video_name]}_{full_to_abbrev[style_name]}.gif')
     # save the mask as gif
-    combine_as_gif(f'mask_', 'jpg', 'output_flows', out_dir, 1 + (n_frames - 1)//step, 1, f'{full_to_abbrev[video_name]}_{full_to_abbrev[style_name]}_mask.gif')
+    combine_as_gif(f'mask_', 'jpg', 'output_flows', out_dir, (n_frames - 1)//step, 1, f'{full_to_abbrev[video_name]}_{full_to_abbrev[style_name]}_mask.gif')
     print("Done!")
 
