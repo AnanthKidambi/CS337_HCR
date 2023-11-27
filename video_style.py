@@ -516,11 +516,13 @@ def prepare():
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--load_cache", action="store_true")
-    parser.add_argument('--videoname', type=str, default='dragon.gif')
-    parser.add_argument('--stylename', type=str, default='kandinsky.jpg')
+    parser.add_argument('--videoname', type=str, default='pexel.mp4')
+    parser.add_argument('--stylename', type=str, default='aframov.jpg')
     parser.add_argument('--indir', type=str, default='input')
     parser.add_argument('--middir', type=str, default='output_frames')
     parser.add_argument('--outdir', type=str, default='output')
+    parser.add_argument('--imgstyledir', type=str, default='no_stt_style_transfer')
+    parser.add_argument('--flowdir', type=str, default='output_flows')
     parser.add_argument('--step', type=int, default=1)
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--wandb', action='store_true')
@@ -608,15 +610,15 @@ if __name__ == "__main__":
     if not args.load_cache and not args.no_stt:
         print("Computing forward optical flows...")        
         optical_flow = generate_optical_flow(input_frames, reverse=False).cpu()
-        torch.save(optical_flow, 'optical_flow.pt')
+        torch.save(optical_flow, f'{args.flowdir}/optical_flow.pt')
 
         print("Computing backward optical flows...")
         reverse_optical_flow = generate_optical_flow(input_frames, reverse=True).cpu()
-        torch.save(reverse_optical_flow, 'reverse_optical_flow.pt')
+        torch.save(reverse_optical_flow, f'{args.flowdir}/reverse_optical_flow.pt')
     
     else:
-        optical_flow = torch.load('optical_flow.pt').cpu()
-        reverse_optical_flow = torch.load('reverse_optical_flow.pt').cpu()
+        optical_flow = torch.load(f'{args.flowdir}/optical_flow.pt').cpu()
+        reverse_optical_flow = torch.load(f'{args.flowdir}/reverse_optical_flow.pt').cpu()
 
     print("Device being used:", utils.device)
     img_range = None
@@ -635,7 +637,7 @@ if __name__ == "__main__":
             image_style_transfer(
                 f"{mid_dir}/{full_to_abbrev[video_name]}_frame_{i}.jpg", 
                 f'{in_dir}/{style_name}.{style_ext}', 
-                save_path=f"no_stt_style_transfer/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
+                save_path=f"{args.imgstyledir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
                 init_img=None, 
                 num_steps=500
             )
@@ -659,7 +661,7 @@ if __name__ == "__main__":
                     f'{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i-1}.jpg',
                     reverse_optical_flow[i-1],
                     frame_num=i,
-                    img_style_res=f'no_stt_style_transfer/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg',
+                    img_style_res=f'{args.imgstyledir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg',
                     save_path=f"{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
                     num_steps=10
                 )
