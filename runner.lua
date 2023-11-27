@@ -63,7 +63,10 @@ def get_num_frames(video_path, step):
         return len(input_frames)//step + 1
     else:
         raise NotImplementedError("other types not supported")
-    
+
+def run_video_style_transfer(arg_string: str, device: str):
+    os.system(f'python video_style.py {arg_string} --cuda {device} --load_cache')
+
 def run_range(arg_string: str, device: str, start: int, end: int):
     os.system(f'python video_style.py {arg_string} --no_stt --start {start} --end {end} --cuda {device} --load_cache')
 
@@ -73,13 +76,13 @@ def run_flows(arg_string: str, device: str):
 def main():
     # parse arguments
     args = parse()
-    # arg_string = f'--videoname {args.videoname} --stylename {args.stylename} --indir {args.indir} --middir {args.middir} --outdir {args.outdir} --imgstyledir {args.imgstyledir} --flowdir {args.flowdir} --step {args.step} --debug {args.debug} --wandb {args.wandb}'
-    arg_string = f'--force --videoname {args.videoname} --stylename {args.stylename} --indir "{args.indir}" --middir "{args.middir}" --outdir "{args.outdir}" --step {args.step}'
+    arg_string = f'--videoname {args.videoname} --stylename {args.stylename} --indir {args.indir} --middir {args.middir} --outdir {args.outdir} --imgstyledir {args.imgstyledir} --flowdir {args.flowdir} --step {args.step} --debug {args.debug} --wandb {args.wandb}'
+    # arg_string = f'--force --videoname {args.videoname} --stylename {args.stylename} --indir "{args.indir}" --middir "{args.middir}" --outdir "{args.outdir}" --step {args.step}'
     if args.wandb:
         arg_string += ' --wandb'
     if args.debug:
         arg_string += ' --debug'
-    print(arg_string)
+    print('Args:', arg_string)
     
     # get free devices
     num_devices = 4
@@ -87,7 +90,11 @@ def main():
     print(f'free devices: {free_devices}')
 
     # compute flows and image style transfer for each frame
-    run_flows(arg_string, free_devices[0])
+    try:
+        run_flows(arg_string, free_devices[0])
+    except:
+        print("could not run flows")
+        exit(1)
 
     name, ext = args.videoname.split('.')
     if name in utils.abbrev_to_full:
@@ -95,22 +102,40 @@ def main():
     video_path = f'{args.indir}/{name}.{ext}'
     num_frames = get_num_frames(video_path, args.step)
     print(f'num_frames: {num_frames}')
+    
     num_frames_per_device = num_frames // num_devices + 1
+    
     for i in range(num_devices):
         start = i*num_frames_per_device
-        end = (i+1)*num_frames_per_device if i != num_devices - 1 else num_frames
+        end = (i+1)*num_frames_per_device 
+        if end > num_frames: end = -1
         print(f'start: {start}, end: {end}')
         t = threading.Thread(target=run_range, args=(arg_string, free_devices[i], start, end))
-        t.start()
+        try:
+            t.start()
+        except:
+            print("could not run range", start, end)
+            exit(1)
     
     for i in range(num_devices):
         t.join()
+
+    print("finished range")
+
+    free_dev = get_free_devices(1)[0]
+    print(f'video style transfer on device: cuda {free_dev}')
+    try:
+        run_video_style_transfer(arg_string, free_dev)
+    except:
+        print("could not run video style transfer")
+        exit(1)
 
     # combine frames into gif
     try:
         utils.make_gif(name, num_frames, step=args.step)
     except:
         print("could not make gif")
+        exit(1)
 
 if __name__ == "__main__":
     main()
