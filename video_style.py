@@ -605,7 +605,7 @@ if __name__ == "__main__":
 
     input_frames = torch.stack(list_frames) # input frames reduced step
 
-    if not args.load_cache:
+    if not args.load_cache and not args.no_stt:
         print("Computing forward optical flows...")        
         optical_flow = generate_optical_flow(input_frames, reverse=False).cpu()
         torch.save(optical_flow, 'optical_flow.pt')
