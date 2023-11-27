@@ -5,3 +5,7 @@ torchvision
 tqdm
 wandb
 scikit-image
+pandas
+moviepy
+av
+matplotlib

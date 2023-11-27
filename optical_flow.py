@@ -41,22 +41,26 @@ def generate_optical_flow(input_frames : torch.Tensor, reverse : bool = False):
 
 if __name__  == "__main__":
     video_name = "pexelscom_pavel_danilyuk_basketball_hd"
+    video_name = "tom_and_jerry"
     video_ext = "mp4"
     in_dir = 'input'
     mid_dir = "output_flows"
     out_dir = "output"
 
     input_frames, _, _ = read_video(f'{in_dir}/{video_name}.{video_ext}', output_format="TCHW", pts_unit='sec')
+    input_frames = input_frames[:5]
 
     optical_flow = generate_optical_flow(input_frames, reverse=False)
     reverse_optical_flow = generate_optical_flow(input_frames, reverse=True)
     for i in range(len(optical_flow)):
         flow_img = flow_to_image(optical_flow[i]).to("cpu")
-        write_jpeg(flow_img, f"{mid_dir}/{video_name[:6]}_flow_{i}.jpg")
+        print('fwd', optical_flow[i].max(), optical_flow[i].min())
+        print('rev', reverse_optical_flow[i].max(), reverse_optical_flow[i].min())
+        write_jpeg(flow_img, f"{mid_dir}/{video_name}_flow_{i}.jpg")
         rev_flow_img = flow_to_image(reverse_optical_flow[i]).to("cpu")
-        write_jpeg(rev_flow_img, f"{mid_dir}/{video_name[:6]}_rev_flow_{i}.jpg")
+        write_jpeg(rev_flow_img, f"{mid_dir}/{video_name}_rev_flow_{i}.jpg")
         
-    combine_as_gif(f"{video_name[:6]}_flow_", 'jpg', mid_dir, out_dir, 331, 1, "bb_flow.gif")
-    combine_as_gif(f"{video_name[:6]}_rev_flow_", 'jpg', mid_dir, out_dir, 331, 1, "bb_rev_flow.gif")
+    combine_as_gif(f"{video_name}_flow_", 'jpg', mid_dir, out_dir, 331, 1, "bb_flow.gif")
+    combine_as_gif(f"{video_name}_rev_flow_", 'jpg', mid_dir, out_dir, 331, 1, "bb_rev_flow.gif")
     
     
