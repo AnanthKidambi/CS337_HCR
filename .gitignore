@@ -5,7 +5,6 @@ output_flows/*
 output_frames/*
 __pycache__/*
 *.pt
-random/*
 wandb/**
 output/*
 

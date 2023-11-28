@@ -46,7 +46,6 @@ class extractor:
 
         img2 = transforms.Normalize(mean=self.means, std=self.std)(img)
         if debug: 
-            # if img2.isnan().any() or img2.isinf().any():
             if img2.isnan().any() or (torch.max(torch.abs(img2)) >= high_val):
                 print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
                 import IPython
@@ -55,14 +54,11 @@ class extractor:
         out = self.extractor(img2)
         if debug: 
             for outv in out.values():
-                # if outv.isnan().any() or outv.isinf().any():
                 if outv.isnan().any() or (torch.max(torch.abs(outv)) >= high_val):
                     print(f"Ipython from line {inspect.currentframe().f_lineno} of neural_style.py")
                     import IPython
                     IPython.embed()
                     exit()
-        # for outv in out.values():
-        #     outv[outv.isnan()] = outv.mean()
         for key in out:
             out[key] = torch.where(out[key].isnan(), torch.zeros_like(out[key]), out[key])
         
@@ -75,7 +71,6 @@ class extractor:
                     exit()
         return {key: val for key, val in out.items() if key in self.style_layers.values()}, {key: val for key, val in out.items() if key in self.content_layers.values()}
     def __call__(self, img, normalize = False):
-        # normalize = False
         debug = utils.debug
         high_val = utils.high_val
         
@@ -110,9 +105,8 @@ class ImageStyleTransfer:
 
         self.device = torch.device(utils.device if torch.cuda.is_available() else "cpu")
         print("Device being used:", self.device)
-        # pre_means = [0.485, 0.456, 0.406]
         self.pre_means = [0.48501961, 0.45795686, 0.40760392]
-        self.pre_stds = [1, 1, 1]#[0.229, 0.224, 0.225]
+        self.pre_stds = [1, 1, 1]
         self.img_size = img_size
 
         style_layer_nums = [1, 6, 11, 20, 29] # taken from https://www.mathworks.com/help/deeplearning/ref/vgg19.html
@@ -160,7 +154,6 @@ class ImageStyleTransfer:
         optimizer = torch.optim.LBFGS([noise_img], max_iter=1, lr=lr)
         def closure():
             iter_range.update()
-            # self.proc.postprocess(noise_img.clone()).save(f'random/noise_0_{num_iter[0]}.jpg')
             style_outputs, content_outputs = self.ext(noise_img)
             loss = 0.
             num_iter[0] += 1
@@ -185,24 +178,25 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-n', type=int, default=500)
     args = parser.parse_args()
-    content = "input/tubingen.jpg"
-    # content = "input/mbs.jpg"
-    # content = "input/leopard.jpg"
-    # content = "input/iitb.png"
-    # content = "input/taj_mahal.png"
-    # content = "input/ashwin.jpg"
-    # content = "input/Aspark-Owl.jpg"
-    # content = "input/tom_and_jerry.jpg"
-    # content = "input/jv_bokassa.png"
-    # content = "output/frame_0.jpg"
-    content = "input/jv_sleeping.jpg"
-    # style = "input/rain-princess-aframov.jpg"
-    style = "input/kandinsky.jpg"
-    # style = "input/eye_supernova.jpg"
-    # style = "input/shipwreck.jpg"
-    # style = "input/escher_sphere.jpg"
-    # style = "input/picasso_selfport1907.jpg"
-    # style = "input/frida_kahlo.jpg"
+    content = "input/content/tubingen.jpg"
+    # content = "input/content/mbs.jpg"
+    # content = "input/content/leopard.jpg"
+    # content = "input/content/iitb.png"
+    # content = "input/content/taj_mahal.png"
+    # content = "input/content/ashwin.jpg"
+    # content = "input/content/Aspark-Owl.jpg"
+    # content = "input/content/tom_and_jerry.jpg"
+    # content = "input/content/jv_bokassa.png"
+    content = "input/content/jv_sleeping.jpg"
+
+    # style = "input/style/rain-princess-aframov.jpg"
+    style = "input/style/kandinsky.jpg"
+    # style = "input/style/eye_supernova.jpg"
+    # style = "input/style/shipwreck.jpg"
+    # style = "input/style/escher_sphere.jpg"
+    # style = "input/style/picasso_selfport1907.jpg"
+    # style = "input/style/frida_kahlo.jpg"
+
     size = Image.open(content).convert("RGB")._size
     img_size = tuple([i - i%8 for i in size[1:]])
     name = f'{content.split("/")[-1].split(".")[0]}_{style.split("/")[-1].split(".")[0]}'

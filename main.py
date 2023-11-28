@@ -13,55 +13,32 @@ import argparse
 from neural_style import ImageStyleTransfer, processor, extractor
 from optical_flow import generate_optical_flow
 import os
-import shutil
 import inspect
 import wandb
 import skimage
-import pandas as pd
 
 debug = utils.debug
 high_val = utils.high_val
 seed = utils.seed
 use_wandb = None
 
-# def read_weights_file(path):
-#     df = pd.read_csv(path, header=None)
-#     vals = df.to_numpy()[:, :-1]
-#     weights = (vals >= 254)
-#     return weights
-
-# def get_content_weights(frame, prev_frame):
-#     content_weights_frmt = 'reliable_{}_{}.txt'
-#     mask_dir = '../flows/'
-#     forward_fn = content_weights_frmt.format(str(prev_frame), str(frame))
-#     backward_fn = content_weights_frmt.format(str(frame), str(prev_frame))
-#     forward_path = os.path.join(mask_dir, forward_fn)
-#     backward_path = os.path.join(mask_dir, backward_fn)
-#     forward_weights = read_weights_file(forward_path)
-#     backward_weights = read_weights_file(backward_path)
-#     return forward_weights
-#     # return backward_weights
-
 class VideoStyleTransfer:
     def __init__(self, img_size) -> None:
-        # self.device = 'cpu'
+
         self.device = torch.device(utils.device if torch.cuda.is_available() else "cpu")
-        # pre_means = [0.485, 0.456, 0.406]
         self.pre_means = [0.48501961, 0.45795686, 0.40760392]
-        self.pre_stds = [1, 1, 1] #[0.229, 0.224, 0.225]
+        self.pre_stds = [1, 1, 1]
         self.img_size = img_size
 
         style_layer_nums = [1, 6, 11, 20, 29] # taken from https://www.mathworks.com/help/deeplearning/ref/vgg19.html
         content_layer_num = 22
 
-        # self.content_layers = {f"features.{content_layer_num}": "relu4_2"}
         self.content_layers = {f"features.{content_layer_num}": "conv4_2"}
         self.style_layers = {f"features.{i}": f"relu{j+1}_1" for j, i in enumerate(style_layer_nums)} # hardcoded layer names
 
-        # _style_wt_list = [1e3/n**2 for n in [64, 128, 256, 512, 512]]
         _style_wt_list = [0.2, 0.2, 0.2, 0.2, 0.2]
         self.style_weights = {val:_style_wt_list[j]*10 for j, val in enumerate(self.style_layers.values())}
-        # _content_wt_list = [1.0]
+        
         _content_wt_list = [0.1]
         self.content_weights = {val:_content_wt_list[j] for j, val in enumerate(self.content_layers.values())}
         self.stt_weight = 2e2 # short term temporal consistency weight
@@ -110,12 +87,8 @@ class VideoStyleTransfer:
 
             return np.concatenate([flat_flow0[coords_][:, np.newaxis], flat_flow1[coords_][:, np.newaxis]], axis=1)
 
-        # skimage supports all channels at once, maybe do that?
-        # templ_merged = skimage.transform.warp(p_image.numpy(), transform_function)    # add preserve_range
-        # return torch.tensor(templ_merged).cpu()
-
         for chan in range(p_image.shape[0]):
-            temp_merged = skimage.transform.warp(p_image[chan].numpy(), transform_function, preserve_range=True)    # add preserve_range
+            temp_merged = skimage.transform.warp(p_image[chan].numpy(), transform_function, preserve_range=True) 
 
             if debug:
                 if np.max(np.abs(temp_merged)) >= 1e30:
@@ -141,45 +114,6 @@ class VideoStyleTransfer:
         # To detect disocclusions, we perform a forward-backward consistency check of the optical flow [11]. Let w = (u,v) be the optical flow in forward direction and wˆ = (uˆ,vˆ) the flow in backward direction. Denote by we the forward flow warped to the second image:
         w_tilde = self.warp(flow, rev_flow)
 
-        ###### plotting the lhs ###########
-        # from matplotlib import pyplot as plt
-        # # plt.imshow((self.squared_norm(w_tilde + rev_flow) - (0.01*(self.squared_norm(w_tilde) + self.squared_norm(rev_flow)) + 0.5)).cpu().numpy())
-        # plt.imshow(self.squared_norm((w_tilde + rev_flow)))
-        # plt.savefig(f'output_flows/temp_{frame_num}.jpg')
-
-        # plt.imshow(flow[0])
-        # plt.savefig(f'output_flows/forwardx_{frame_num}.jpg')
-        # print('forward0-max', torch.max(flow[0]))
-        # print('forward0-min', torch.min(flow[0]))
-        # plt.imshow(flow[1])
-        # plt.savefig(f'output_flows/forwardy_{frame_num}.jpg')
-        # print('forward1-max', torch.max(flow[1]))
-        # print('forward1-min', torch.min(flow[1]))
-
-        
-        # plt.imshow(rev_flow[0])
-        # plt.savefig(f'output_flows/reversex_{frame_num}.jpg')
-        # print('reverse0-max', torch.max(rev_flow[0]))
-        # print('reverse0-min', torch.min(rev_flow[0]))
-        # plt.imshow(rev_flow[1])
-        # plt.savefig(f'output_flows/reversey_{frame_num}.jpg')
-        # print('reverse1-max', torch.max(rev_flow[1]))
-        # print('reverse1-min', torch.min(rev_flow[1]))
-
-        
-        # plt.imshow(w_tilde[0])
-        # plt.savefig(f'output_flows/tildex_{frame_num}.jpg')
-        # print('tilde0-max', torch.max(w_tilde[0]))
-        # print('tilde0-min', torch.min(w_tilde[0]))
-        # plt.imshow(w_tilde[1])
-        # plt.savefig(f'output_flows/tildey_{frame_num}.jpg')
-        # print('tilde1-max', torch.max(w_tilde[1]))
-        # print('tilde1-min', torch.min(w_tilde[1]))
-        
-        # print('max', torch.max(w_tilde + rev_flow))
-        # print('min', torch.min(w_tilde + rev_flow))
-        # plt.savefig("lhs.jpg")
-        ###################################
         return (self.squared_norm(w_tilde + rev_flow) <= 
                 (0.03*(self.squared_norm(w_tilde) + self.squared_norm(rev_flow))) + 1)
 
@@ -208,11 +142,6 @@ class VideoStyleTransfer:
         # ========= sanity checks ============
         assert flow.shape[0] == 2, f"Shape is {flow.shape[0]}"
         assert rev_flow.shape[0] == 2, f"Shape is {rev_flow.shape[0]}"
-        
-        # if debug: 
-        #     print(flow.device, rev_flow.device)
-        # assert flow.device == 'cpu', 'flow needs to be on cpu'
-        # assert rev_flow.device == 'cpu', 'rev_flow needs to be on cpu'
         # ========= end of sanity checks ============
 
         self.style_img, self.content_img, self.prev_frame_img, self.img_style_res = self.get_images(content, style, prev_out, img_style_res)
@@ -222,9 +151,6 @@ class VideoStyleTransfer:
         p_prev_frame = self.proc.preprocess(self.prev_frame_img).cpu()
         p_img_style = self.proc.preprocess(self.img_style_res).to(self.device)
 
-        # if debug: 
-        #     print('check-input', p_style.isnan().nonzero(), p_content.isnan().nonzero(), p_prev_frame.isnan().nonzero(), flow.isnan().nonzero(), rev_flow.isnan().nonzero())
-        #     print('check-input2', p_style.isinf().nonzero(), p_content.isinf().nonzero(), p_prev_frame.isinf().nonzero(), flow.isinf().nonzero(), rev_flow.isinf().nonzero())
         p_style[p_style.isnan()] = p_style.mean()
         p_content[p_content.isnan()] = p_content.mean()
         p_prev_frame[p_prev_frame.isnan()] = p_prev_frame.mean()
@@ -241,8 +167,6 @@ class VideoStyleTransfer:
         _, actual_content_outputs = self.ext(p_content, normalize=True)
 
         ##### CPU computation #############
-
-        # prev_warped = self.warp(p_prev_frame.squeeze(0), rev_flow).unsqueeze(0) # note that we are using the reverse flow because of the semantics of cv2.remap
         try:
             partial_transform_1 = transforms.Compose([
                 transforms.Resize(self.proc.img_size),
@@ -259,16 +183,6 @@ class VideoStyleTransfer:
             print(f"Ipython from line {inspect.currentframe().f_lineno} of video_style.py")
             import IPython
             IPython.embed()
-        ###################################
-        # if debug:
-        #     prev_warped_2 = self.warp(p_prev_frame.squeeze(0), rev_flow).unsqueeze(0)
-        #     if not torch.allclose(prev_warped, prev_warped_2):
-        #         print(f"Ipython from line {inspect.currentframe().f_lineno} of video_style.py")
-        #         import IPython
-        #         IPython.embed()
-        ###################################
-
-        # prev_warped[prev_warped.isnan()] = p_prev_frame[prev_warped.isnan()]
 
         if debug: 
             if prev_warped.isnan().any() or (torch.max(torch.abs(prev_warped)) >= high_val):
@@ -293,10 +207,6 @@ class VideoStyleTransfer:
         assert prev_warped.shape == p_prev_frame.shape, f"Shapes {prev_warped.shape} and {p_prev_frame.shape} don't match" 
         # ========= end of sanity checks ============   
 
-        # masked_region_loss_scaling = 0.5
-        # actual_gram_matrices, _ = self.ext(p_style * (1 + masked_region_loss_scaling * ~stt_mask), normalize=True)
-        # _, actual_content_outputs = self.ext(p_content * (1 + masked_region_loss_scaling * ~stt_mask), normalize=True)
-
         ### Saving masks and warped images for debugging ##########
         if debug:
             self.proc.postprocess(prev_warped.clone()).save(f'output_flows/warped_{frame_num}.jpg')
@@ -309,31 +219,26 @@ class VideoStyleTransfer:
             mask_img[:, :, :] = 255
             mask_img[:, :, ~stt_mask] = 0
             write_jpeg(mask_img.cpu().squeeze(0), f'output_flows/mask_{frame_num-1}.jpg')
-            return None
         ### End of Saving masks and warped images for debugging ##########
 
-        # prev_warped[:, :, ~disocc_mask] = p_content[:, :, ~disocc_mask]
+        prev_warped[:, :, ~disocc_mask] = p_content[:, :, ~disocc_mask]
 
         # prev_warped = prev_warped.clip(0, 255)
 
         # noise = torch.randn_like(prev_warped, device=self.device, requires_grad=False) * 10
-        # noise = transforms.GaussianBlur(5)(noise)
         # noise_img = prev_warped.clone()
         # noise_img[:, :, ~stt_mask] = p_img_style[:, :, ~stt_mask]
         # noise_img = p_content.clone()
         noise_img = p_img_style.clone()
-        # noise_img = noise_img.to(self.device)
 
         noise_img.requires_grad = True
         num_iter = [0]
         iter_range = tqdm(range(num_steps)) if debug else range(num_steps)
-        # lr = 1
         optimizer = torch.optim.LBFGS([noise_img], max_iter=1)
 
         def closure():
             if debug:
                 iter_range.update()
-                # if not num_iter[0] % 50: self.proc.postprocess(noise_img.detach().clone()).save(f'random/noise_{frame_num}_{num_iter[0]}.jpg')
                 if noise_img.isnan().any():
                     print(noise_img.isnan().any())
                     print(prev_warped.isnan().any())
@@ -342,9 +247,7 @@ class VideoStyleTransfer:
                     import IPython
                     IPython.embed()
                     exit()
-                # noise_img[noise_img.isnan()] = 0.
             style_outputs, content_outputs = self.ext(noise_img, normalize=True)
-            # style_outputs, content_outputs = self.ext(noise_img * (1 + masked_region_loss_scaling * ~stt_mask), normalize=True)
             if debug:
                 for val in style_outputs.values():
                     if val.isnan().any() or (torch.max(torch.abs(val)) >= high_val):
@@ -371,19 +274,13 @@ class VideoStyleTransfer:
             for key, val in style_outputs.items():
                 if debug and val.isnan().any(): 
                     print(val.isnan().nonzero(), val.isinf().nonzero())
-                style_loss += self.style_weights[key] * F.mse_loss(val, actual_gram_matrices[key]) #* val.numel()
-            # content_weight_multiplier = 1 + (~stt_mask) * extra_content_loss
-            # __import__("IPython").embed(); exit()
+                style_loss += self.style_weights[key] * F.mse_loss(val, actual_gram_matrices[key]) 
             for key, val in content_outputs.items():
-                content_loss += self.content_weights[key] * F.mse_loss(val, actual_content_outputs[key]) * 0.5 #* (val.numel()**0.5)
-            # h, w = prev_warped.shape[2], prev_warped.shape[3]
-            # style_loss /= ((h * w))
-            # loss = style_loss.clip(0, high_val) + content_loss.clip(0, high_val)  
+                content_loss += self.content_weights[key] * F.mse_loss(val, actual_content_outputs[key]) * 0.5
             loss = style_loss + content_loss
 
             ## add the short term temporal consistency loss
             stt_loss = self.stt_weight * torch.mean(stt_mask * torch.square(noise_img - prev_warped)) * 0.5
-            # stt_loss = self.stt_weight * F.mse_loss(noise_img, prev_warped) * 0.5
             if debug:
                 print('style_loss =', style_loss.item())
                 print('content_loss =', content_loss.item())
@@ -405,7 +302,6 @@ class VideoStyleTransfer:
                 wandb.log({'loss' : loss.item(), 'content_loss': content_loss.item(), 'style_loss' : style_loss.item(), 'stt_loss' : stt_loss.item(), 'tv_loss' : tv_loss.item()})
 
             if debug:
-                # if np.isinf(style_loss.item()):
                 if np.abs(style_loss.item()) >= high_val:
                     print("Style loss is inf")
                     print(f"Ipython from line {inspect.currentframe().f_lineno} of video_style.py")
@@ -413,7 +309,6 @@ class VideoStyleTransfer:
                     IPython.embed()
                     exit()    
 
-                # if np.isinf(content_loss.item()):
                 if np.abs(content_loss.item()) > high_val:
                     print("Content loss is inf")
                     print(f"Ipython from line {inspect.currentframe().f_lineno} of video_style.py")
@@ -421,7 +316,6 @@ class VideoStyleTransfer:
                     IPython.embed()
                     exit()
 
-                # if np.isinf(stt_loss.item()):
                 if np.abs(stt_loss.item()) >= high_val:
                     print("STT loss is inf")
                     print(f"Ipython from line {inspect.currentframe().f_lineno} of video_style.py")
@@ -429,7 +323,6 @@ class VideoStyleTransfer:
                     IPython.embed()
                     exit()
 
-                # if np.isinf(tv_loss.item()):
                 if np.abs(tv_loss.item()) >= high_val:
                     print("TV loss is inf")
                     print(f"Ipython from line {inspect.currentframe().f_lineno} of video_style.py")
@@ -441,7 +334,6 @@ class VideoStyleTransfer:
             loss.backward()
             if debug: 
                 print(torch.max(noise_img.grad))
-            # torch.nn.utils.clip_grad_value_(noise_img, clip_value=1)
             if debug: 
                 print(torch.max(noise_img.grad))
             return loss
@@ -451,10 +343,6 @@ class VideoStyleTransfer:
 
             if use_wandb:
                 wandb.log({'max-noise-img' : torch.max(torch.abs(noise_img)).item()})
-
-        ###########################
-        # noise_img = noise_img.clip(0, 255)
-        ############################
 
         corr_img = noise_img.detach().clone()
         corr_img = self.proc.postprocess(corr_img)
@@ -504,9 +392,10 @@ def prepare():
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--load_cache", action="store_true")
-    parser.add_argument('--videoname', type=str, default='pexel.mp4')
+    parser.add_argument('--videoname', type=str, default='dragon.gif')
     parser.add_argument('--stylename', type=str, default='kandinsky.jpg')
-    parser.add_argument('--indir', type=str, default='input')
+    parser.add_argument('--styledir', type=str, default='input/style')
+    parser.add_argument('--contentdir', type=str, default='input/content')
     parser.add_argument('--middir', type=str, default='output_frames')
     parser.add_argument('--outdir', type=str, default='output')
     parser.add_argument('--imgstyledir', type=str, default='no_stt_style_transfer')
@@ -540,7 +429,8 @@ def prepare():
         args.stylename = abbrev_to_full[args.stylename]
 
     # prepare directory structure
-    assert os.path.isdir(args.indir), 'invalid input directory'
+    assert os.path.isdir(args.styledir), 'invalid style directory'
+    assert os.path.isdir(args.contentdir), 'invalid content directory'
     if not args.force:
         assert os.path.isdir(args.middir), 'invalid mid directory'
         assert os.path.isdir(args.outdir), 'invalid output directory'
@@ -548,8 +438,6 @@ def prepare():
     
     for dirname in ['mid']:
         dirname = getattr(args, dirname+'dir')
-        # if os.path.isdir(dirname): 
-        #     shutil.rmtree(dirname)
         if not os.path.isdir(dirname): os.mkdir(dirname) 
     if not os.path.isdir('output_flows'):
         os.mkdir('output_flows')
@@ -557,11 +445,11 @@ def prepare():
     return args, videoext, styleext
 
 if __name__ == "__main__":
-    print("Started Program")
     args, video_ext, style_ext = prepare()
     video_name = args.videoname
     style_name = args.stylename
-    in_dir = args.indir
+    style_dir = args.styledir
+    content_dir = args.contentdir
     mid_dir = args.middir
     out_dir = args.outdir
     debug = args.debug
@@ -574,7 +462,7 @@ if __name__ == "__main__":
         import time
         wandb.init(project='video-style-transfer', name=f"expt_{int(time.time())}")
 
-    n_frames = num_frames(in_dir, video_name, video_ext)
+    n_frames = num_frames(content_dir, video_name, video_ext)
     
     if not args.force:
         n_frames = 50   
@@ -583,7 +471,7 @@ if __name__ == "__main__":
             mid_dir, out_dir, 1 + (n_frames - 1)//step, step, 
             f'{full_to_abbrev[video_name]}_{full_to_abbrev[style_name]}.gif')
         exit()
-    input_frames = get_frames(in_dir, video_name, video_ext)[:args.n_frames if args.n_frames != -1 else None]
+    input_frames = get_frames(content_dir, video_name, video_ext)[:args.n_frames if args.n_frames != -1 else None]
     img_size = tuple([i - i%8 for i in input_frames.shape[2:]]) # optical flow needs multiple of 8
 
     input_frames = transforms.Resize(img_size)(input_frames)
@@ -624,7 +512,7 @@ if __name__ == "__main__":
             image_style_transfer = ImageStyleTransfer(img_size)
             image_style_transfer(
                 f"{mid_dir}/{full_to_abbrev[video_name]}_frame_{i}.jpg", 
-                f'{in_dir}/{style_name}.{style_ext}', 
+                f'{style_dir}/{style_name}.{style_ext}', 
                 save_path=f"{args.imgstyledir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
                 init_img=None, 
                 num_steps=500
@@ -636,7 +524,7 @@ if __name__ == "__main__":
                 video_style_transfer = VideoStyleTransfer(img_size)
                 video_style_transfer(
                     f'{mid_dir}/{full_to_abbrev[video_name]}_frame_{i}.jpg', 
-                    f'{in_dir}/{style_name}.{style_ext}', 
+                    f'{style_dir}/{style_name}.{style_ext}', 
                     optical_flow[i-1],
                     f'{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i-1}.jpg',
                     reverse_optical_flow[i-1],
@@ -645,10 +533,4 @@ if __name__ == "__main__":
                     save_path=f"{mid_dir}/{full_to_abbrev[video_name]}_processed_frame_{i}.jpg", 
                     num_steps=10
                 )
-    # print("Creating GIF.....")
-    # combine_as_gif(f'{full_to_abbrev[video_name]}_processed_frame_', 'jpg', mid_dir, out_dir, 1 + (n_frames - 1)//step, 1, f'{full_to_abbrev[video_name]}_{full_to_abbrev[style_name]}.gif')
-    # save the mask as gif
-    # if args.debug:
-        # combine_as_gif(f'mask_', 'jpg', 'output_flows', out_dir, (n_frames - 1)//step, 1, f'{full_to_abbrev[video_name]}_{full_to_abbrev[style_name]}_mask.gif')
-    print("Done!")
 

@@ -1,8 +1,9 @@
 import subprocess
 import threading
 import argparse
+
+import IPython
 import utils
-import torch
 import torchvision.io as io
 import PIL
 import re
@@ -12,8 +13,9 @@ def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true")
     parser.add_argument('--videoname', type=str, default='dragon.gif')
-    parser.add_argument('--stylename', type=str, default='picasso.jpg')
-    parser.add_argument('--indir', type=str, default='input')
+    parser.add_argument('--stylename', type=str, default='kandinsky.jpg')
+    parser.add_argument('--styledir', type=str, default='input/style')
+    parser.add_argument('--contentdir', type=str, default='input/content')
     parser.add_argument('--middir', type=str, default='output_frames')
     parser.add_argument('--outdir', type=str, default='output')
     parser.add_argument('--imgstyledir', type=str, default='no_stt_style_transfer')
@@ -22,15 +24,15 @@ def parse():
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--wandb', action='store_true')
     parser.add_argument('--seed', type=int, default=42)
-    # parser.add_argument('--cuda', type=int, default=0)
     parser.add_argument('--cpu', action='store_true')
+    parser.add_argument('--n_threads', type=int, default=1)
     args = parser.parse_args()
     
     utils.set_seed(args.seed)
-    # utils.device = f'cuda:{args.cuda}' if torch.cuda.is_available() and not args.cpu else 'cpu'
 
     # prepare directory structure
-    assert os.path.isdir(args.indir), 'invalid input directory'
+    assert os.path.isdir(args.styledir), 'invalid style directory'
+    assert os.path.isdir(args.contentdir), 'invalid content directory'
     if not args.force:
         assert os.path.isdir(args.middir), 'invalid mid directory'
         assert os.path.isdir(args.outdir), 'invalid output directory'
@@ -57,10 +59,10 @@ def get_num_frames(video_path, step):
     if video_ext == 'gif':
         input_frames = []
         with PIL.Image.open(video_path) as f:
-            return f.n_frames//step + 1
+            return f.n_frames//step
     elif video_ext == 'mp4':
         input_frames, _, _ = io.read_video(video_path, pts_unit='sec')
-        return len(input_frames)//step + 1
+        return len(input_frames)//step
     else:
         raise NotImplementedError("other types not supported")
 
@@ -71,14 +73,10 @@ def run_range(arg_string: str, device: str, start: int, end: int):
     print(f'python main.py {arg_string} --no_stt --start {start} --end {end} --cuda {device}')
     os.system(f'python main.py {arg_string} --no_stt --start {start} --end {end} --cuda {device}')
 
-# def run_flows(arg_string: str, device: str):
-#     os.system(f'python main.py {arg_string} --cuda {device}')
-
 def main():
     # parse arguments
     args = parse()
-    arg_string = f'--force --videoname {args.videoname} --stylename {args.stylename} --indir {args.indir} --middir {args.middir} --outdir {args.outdir} --imgstyledir {args.imgstyledir} --flowdir {args.flowdir} --step {args.step}'
-    # arg_string = f'--force --videoname {args.videoname} --stylename {args.stylename} --indir "{args.indir}" --middir "{args.middir}" --outdir "{args.outdir}" --step {args.step}'
+    arg_string = f'--force --videoname {args.videoname} --stylename {args.stylename} --styledir {args.styledir} --contentdir {args.contentdir} --middir {args.middir} --outdir {args.outdir} --imgstyledir {args.imgstyledir} --flowdir {args.flowdir} --step {args.step}'
     if args.wandb:
         arg_string += ' --wandb'
     if args.debug:
@@ -86,21 +84,14 @@ def main():
     print('Args:', arg_string)
     
     # get free devices
-    num_devices = 4
+    num_devices = args.n_threads
     free_devices = get_free_devices(num_devices)
     print(f'free devices: {free_devices}')
-
-    # compute flows and image style transfer for each frame
-    # try:
-    #     run_flows(arg_string, free_devices[0])
-    # except:
-    #     print("could not run flows")
-    #     exit(1)
 
     name, ext = args.videoname.split('.')
     if name in utils.abbrev_to_full:
         name = utils.abbrev_to_full[name]
-    video_path = f'{args.indir}/{name}.{ext}'
+    video_path = f'{args.contentdir}/{name}.{ext}'
     num_frames = get_num_frames(video_path, args.step)
     print(f'num_frames: {num_frames}')
     
@@ -133,9 +124,10 @@ def main():
 
     # combine frames into gif
     try:
-        utils.make_gif(name, num_frames, step=args.step)
+        utils.combine_as_gif(f'{name}_processed_frame_', 'jpg', args.middir, args.outdir, num_frames, args.step, f'{name}_{args.stylename.split(".")[0]}.gif')
     except:
         print("could not make gif")
+        __import__('IPython').embed()
         exit(1)
 
 if __name__ == "__main__":

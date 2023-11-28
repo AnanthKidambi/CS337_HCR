@@ -29,8 +29,7 @@ global full_to_abbrev
 full_to_abbrev = {v:k for k,v in abbrev_to_full.items()}
 
 def combine_as_gif(base : str, ext, in_dir, out_dir, num_images, step, gifname):
-    images = [imageio.imread(f'{in_dir}/{base}{i}.{ext}') for i in range(num_images)]
-    # print(len(images))
+    images = [imageio.imread(f'{in_dir}/{base}{i}.{ext}') for i in range(0, num_images, step)]
     imageio.mimsave(f'{out_dir}/{gifname}', images)
 
 def make_gif(base, n_frames, gifname=None, step=1):

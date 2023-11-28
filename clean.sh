@@ -1,3 +1,3 @@
 rm output_flows/*
 rm output_frames/*
-rm random/*
+rm no_stt_style_transfer/*
