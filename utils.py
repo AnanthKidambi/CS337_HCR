@@ -11,7 +11,7 @@ global seed
 seed = 42
 
 global device
-device = 'cuda:3'
+device = 'cuda:5'
 
 global abbrev_to_full
 abbrev_to_full = {
@@ -21,7 +21,8 @@ abbrev_to_full = {
         'oil': 'oil-crop',
         'dragon': 'dragon',
         'tom' : 'tom_and_jerry',
-        'kandinsky' : 'kandinsky'
+        'kandinsky' : 'kandinsky',
+        'picasso' : 'picasso_selfport1907',
 }
 
 global full_to_abbrev

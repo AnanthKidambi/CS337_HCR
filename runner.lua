@@ -12,7 +12,7 @@ def parse():
     parser = argparse.ArgumentParser()
     parser.add_argument("--force", action="store_true")
     parser.add_argument('--videoname', type=str, default='dragon.gif')
-    parser.add_argument('--stylename', type=str, default='aframov.jpg')
+    parser.add_argument('--stylename', type=str, default='picasso.jpg')
     parser.add_argument('--indir', type=str, default='input')
     parser.add_argument('--middir', type=str, default='output_frames')
     parser.add_argument('--outdir', type=str, default='output')
@@ -49,7 +49,7 @@ def get_free_devices(required: int):
     gpu_free_memory = gpu_free_memory.split('\n')
     gpu_free_memory = gpu_free_memory[1:-1]
     gpu_free_memory = [int(re.findall(r'\d+', x)[0]) for x in gpu_free_memory]
-    available_sorted = sorted(enumerate(gpu_free_memory), key=lambda x: x[1])
+    available_sorted = sorted(enumerate(gpu_free_memory), key=lambda x: -x[1])
     return [f'{x[0]}' for x in available_sorted[:required]]
 
 def get_num_frames(video_path, step):
@@ -65,18 +65,19 @@ def get_num_frames(video_path, step):
         raise NotImplementedError("other types not supported")
 
 def run_video_style_transfer(arg_string: str, device: str):
-    os.system(f'python video_style.py {arg_string} --cuda {device} --load_cache')
+    os.system(f'python main.py {arg_string} --cuda {device}')
 
 def run_range(arg_string: str, device: str, start: int, end: int):
-    os.system(f'python video_style.py {arg_string} --no_stt --start {start} --end {end} --cuda {device} --load_cache')
+    print(f'python main.py {arg_string} --no_stt --start {start} --end {end} --cuda {device}')
+    os.system(f'python main.py {arg_string} --no_stt --start {start} --end {end} --cuda {device}')
 
-def run_flows(arg_string: str, device: str):
-    os.system(f'python video_style.py {arg_string} --cuda {device}')
+# def run_flows(arg_string: str, device: str):
+#     os.system(f'python main.py {arg_string} --cuda {device}')
 
 def main():
     # parse arguments
     args = parse()
-    arg_string = f'--videoname {args.videoname} --stylename {args.stylename} --indir {args.indir} --middir {args.middir} --outdir {args.outdir} --imgstyledir {args.imgstyledir} --flowdir {args.flowdir} --step {args.step} --debug {args.debug} --wandb {args.wandb}'
+    arg_string = f'--force --videoname {args.videoname} --stylename {args.stylename} --indir {args.indir} --middir {args.middir} --outdir {args.outdir} --imgstyledir {args.imgstyledir} --flowdir {args.flowdir} --step {args.step}'
     # arg_string = f'--force --videoname {args.videoname} --stylename {args.stylename} --indir "{args.indir}" --middir "{args.middir}" --outdir "{args.outdir}" --step {args.step}'
     if args.wandb:
         arg_string += ' --wandb'
@@ -90,11 +91,11 @@ def main():
     print(f'free devices: {free_devices}')
 
     # compute flows and image style transfer for each frame
-    try:
-        run_flows(arg_string, free_devices[0])
-    except:
-        print("could not run flows")
-        exit(1)
+    # try:
+    #     run_flows(arg_string, free_devices[0])
+    # except:
+    #     print("could not run flows")
+    #     exit(1)
 
     name, ext = args.videoname.split('.')
     if name in utils.abbrev_to_full:

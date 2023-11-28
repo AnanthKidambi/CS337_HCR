@@ -186,14 +186,25 @@ if __name__ == "__main__":
     parser.add_argument('-n', type=int, default=500)
     args = parser.parse_args()
     content = "input/tubingen.jpg"
+    # content = "input/mbs.jpg"
+    # content = "input/leopard.jpg"
+    # content = "input/iitb.png"
+    # content = "input/taj_mahal.png"
     # content = "input/ashwin.jpg"
     # content = "input/Aspark-Owl.jpg"
+    # content = "input/tom_and_jerry.jpg"
     # content = "input/jv_bokassa.png"
     # content = "output/frame_0.jpg"
+    content = "input/jv_sleeping.jpg"
     # style = "input/rain-princess-aframov.jpg"
-    style = "input/vangogh_starry_night.jpg"
+    style = "input/kandinsky.jpg"
+    # style = "input/eye_supernova.jpg"
+    # style = "input/shipwreck.jpg"
     # style = "input/escher_sphere.jpg"
     # style = "input/picasso_selfport1907.jpg"
     # style = "input/frida_kahlo.jpg"
-    image_style_transfer = ImageStyleTransfer()
-    image_style_transfer(content, style, save_path="output/final.jpg", num_steps=args.n)
+    size = Image.open(content).convert("RGB")._size
+    img_size = tuple([i - i%8 for i in size[1:]])
+    name = f'{content.split("/")[-1].split(".")[0]}_{style.split("/")[-1].split(".")[0]}'
+    image_style_transfer = ImageStyleTransfer(img_size)
+    image_style_transfer(content, style, save_path=f"output/{name}.jpg", num_steps=args.n)
