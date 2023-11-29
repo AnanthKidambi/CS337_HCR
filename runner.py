@@ -90,12 +90,15 @@ def main():
     
     num_frames_per_device = num_frames // num_devices + 1
     
+    threads = []
+
     for i in range(num_devices):
         start = i*num_frames_per_device
         end = (i+1)*num_frames_per_device 
         if end > num_frames: end = -1
         print(f'start: {start}, end: {end}')
         t = threading.Thread(target=run_range, args=(arg_string, free_devices[i], start, end))
+        threads.append(t)
         try:
             t.start()
         except:
@@ -103,7 +106,7 @@ def main():
             exit(1)
     
     for i in range(num_devices):
-        t.join()
+        threads[i].join()
 
     print("finished range")
 
