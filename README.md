@@ -4,7 +4,7 @@ This repository is an implementation of the research papers "[A Neural Algorithm
 
 ## Running Instructions
 
-> **_NOTE:_** The code has been tested on `Ubuntu 18.04` with `Python 3.6.9` and `PyTorch 1.4.0`.
+> **_NOTE:_** Before every run, it is advised to clear the caches using `bash clean.sh`
 
 - Create a virtual environment using `python -m venv .`
 - Run `source bin/activate`
@@ -14,8 +14,6 @@ This repository is an implementation of the research papers "[A Neural Algorithm
 - For image style transfer, update the path of the content and style images in `neural_style.py`, and then run `python neural_style.py`
 
 > **_NOTE:_** `PyTorch` can be installed specific to the system configuration from [here](https://pytorch.org/get-started/locally/).
-
-> **_NOTE:_** Before every run, it is advised to clear the caches using `bash clean.sh`
 
 ## Examples
 ### Image Style Transfer
@@ -27,6 +25,5 @@ This repository is an implementation of the research papers "[A Neural Algorithm
     ![Style transfer for images](./output/jv_sleeping_kandinsky.jpg)
 ### Video Style Transfer
 - Dragon + Kandinsky's Composition 7
+  
     ![Style transfer for videos](./output/dragon_kandinsky.gif)
-- Pexel + Kandinsky's Composition 7
-    ![Style transfer for videos](./output/pexel_aframov.gif)
