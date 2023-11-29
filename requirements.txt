@@ -9,3 +9,5 @@ pandas
 moviepy
 av
 matplotlib
+ipython
+
